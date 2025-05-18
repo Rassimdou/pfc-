@@ -1,0 +1,274 @@
+// schema.prisma
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Core User Management ---
+model User {
+  id              Int                     @id @default(autoincrement())
+  email           String                  @unique
+  name            String
+  password        String?
+  googleId        String?                 @unique
+  role            UserRole                @default(PROFESSOR)
+  speciality      Speciality?             @relation(fields: [specialityId], references: [id])
+  specialityId    Int?
+  taughtModules   Module[]                @relation("ProfessorModules")
+  createdAt       DateTime                @default(now())
+  
+  // Schedule Related
+  scheduleSlots   ScheduleSlot[]
+  surveillanceAssignments SurveillanceAssignment[]
+  swapRequests    SurveillanceSwapRequest[]
+  
+  // Account Management
+  verification    Verification[]
+  refreshTokens   RefreshToken[]
+  pendingTeacher  PendingTeacher[]
+  surveillanceFiles SurveillanceFile[]
+
+  // Relations
+  requestsA       PermutationRequest[]    @relation("Initiator")
+  requestsB       PermutationRequest[]    @relation("Receiver")
+  requestHistory  RequestHistory[]        @relation("UserHistoryChanges")
+
+  @@index([email, role])
+  @@index([createdAt])
+}
+
+enum UserRole {
+  PROFESSOR
+  ADMIN
+  ASSISTANT
+}
+
+// --- Authentication System ---
+model Verification {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expires   DateTime
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  expiresAt DateTime
+}
+
+// --- Academic Structure ---
+model Speciality {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String?
+  palier      PalierType
+  modules     Module[]
+  professors  User[]
+  
+  @@index([name, palier])
+}
+
+enum PalierType {
+  LMD
+  ING
+  SIGL
+}
+
+model Module {
+  id              Int            @id @default(autoincrement())
+  code            String         
+  name            String
+  description     String?
+  academicYear    Int            // Added academic year support
+  palier          PalierType
+  semestre        Semestre
+  speciality      Speciality     @relation(fields: [specialityId], references: [id])
+  specialityId    Int
+  professors      User[]         @relation("ProfessorModules")
+  
+  // Related Entities
+  sections        Section[]
+  scheduleSlots   ScheduleSlot[]
+  surveillanceAssignments SurveillanceAssignment[]
+
+  @@unique([code, academicYear]) // Prevent duplicate modules per year
+  @@index([specialityId, academicYear])
+}
+
+enum Semestre {
+  SEMESTRE1
+  SEMESTRE2
+}
+
+// --- Scheduling System ---
+model ScheduleSlot {
+  id              Int                   @id @default(autoincrement())
+  dayOfWeek       DayOfWeek             
+  startTime       String                // Format: "HH:MM"
+  endTime         String                // Format: "HH:MM"
+  room            String
+  equipment       String?
+  isAvailable     Boolean               @default(true)
+  
+  // Relationships
+  owner           User                  @relation(fields: [ownerId], references: [id])
+  ownerId         Int
+  module          Module                @relation(fields: [moduleId], references: [id])
+  moduleId        Int
+  section         Section               @relation(fields: [sectionId], references: [id])
+  sectionId       Int
+  
+  // Permutation System
+  requestsA       PermutationRequest[]  @relation("SlotA")
+  requestsB       PermutationRequest[]  @relation("SlotB")
+
+  @@unique([moduleId, sectionId, dayOfWeek, startTime])
+  @@index([ownerId, moduleId])
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+}
+
+// --- Surveillance System ---
+model SurveillanceAssignment {
+  id            Int                     @id @default(autoincrement())
+  date          DateTime
+  time          String                  // Format: "HH:MM"
+  module        String
+  room          String
+  isResponsible Boolean                 @default(false)
+  canSwap       Boolean                 @default(true)
+  createdAt     DateTime                @default(now())
+  
+  // Relationships
+  user          User                    @relation(fields: [userId], references: [id])
+  userId        Int
+  fromSwapRequests SurveillanceSwapRequest[] @relation("FromAssignment")
+  toSwapRequests SurveillanceSwapRequest[] @relation("ToAssignment")
+  moduleRef     Module                  @relation(fields: [moduleId], references: [id])
+  moduleId      Int
+
+  @@index([date, userId])
+  @@index([module, room])
+}
+
+model SurveillanceSwapRequest {
+  id              Int                     @id @default(autoincrement())
+  status          SwapRequestStatus       @default(PENDING)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  
+  // Relationships
+  fromAssignment  SurveillanceAssignment  @relation("FromAssignment", fields: [fromAssignmentId], references: [id])
+  fromAssignmentId Int
+  toAssignment    SurveillanceAssignment  @relation("ToAssignment", fields: [toAssignmentId], references: [id])
+  toAssignmentId   Int
+  user            User                    @relation(fields: [userId], references: [id])
+  userId          Int
+
+  @@unique([fromAssignmentId, toAssignmentId])
+}
+
+enum SwapRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// --- File Management ---
+model SurveillanceFile {
+  id           Int      @id @default(autoincrement())
+  originalName String
+  path         String   @unique
+  hash         String   // For file integrity checks
+  uploadedAt   DateTime @default(now())
+  
+  // Relationships
+  user         User     @relation(fields: [userId], references: [id])
+  userId       Int
+
+  @@index([uploadedAt])
+  @@index([userId])
+}
+
+// --- Remaining Models ---
+model Section {
+  id              Int            @id @default(autoincrement())
+  name            String
+  academicYear    Int
+  palier          PalierType?
+  module          Module         @relation(fields: [moduleId], references: [id])
+  moduleId        Int
+  slots           ScheduleSlot[]
+
+  @@index([moduleId, academicYear])
+}
+
+model PermutationRequest {
+  id              Int               @id @default(autoincrement())
+  status          RequestStatus     @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relationships
+  initiator       User              @relation("Initiator", fields: [initiatorId], references: [id])
+  initiatorId     Int
+  receiver        User              @relation("Receiver", fields: [receiverId], references: [id])
+  receiverId      Int
+  slotA           ScheduleSlot      @relation("SlotA", fields: [slotAId], references: [id])
+  slotAId         Int
+  slotB           ScheduleSlot      @relation("SlotB", fields: [slotBId], references: [id])
+  slotBId         Int
+  history         RequestHistory[]
+
+  @@index([status, createdAt])
+}
+
+model RequestHistory {
+  id              Int                 @id @default(autoincrement())
+  status          RequestStatus
+  changedAt       DateTime            @default(now())
+  notes           String?
+  
+  // Relationships
+  request         PermutationRequest  @relation(fields: [requestId], references: [id])
+  requestId       Int
+  changedBy       User                @relation("UserHistoryChanges", fields: [changedById], references: [id])
+  changedById     Int
+
+  @@index([requestId, changedAt])
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+model PendingTeacher {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  createdAt DateTime @default(now())
+  
+  // Relationships
+  addedBy   User     @relation(fields: [adminId], references: [id])
+  adminId   Int
+}

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .header { background-color: #059669; padding: 2rem; text-align: center; }
+        .logo { height: 40px; }
+        .content { padding: 2rem; color: #374151; }
+        .button { 
+            display: inline-block; 
+            padding: 12px 24px;
+            background-color: #059669;
+            color: white !important;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 1.5rem 0;
+            font-weight: 500;
+        }
+        .footer { 
+            padding: 1.5rem;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.875rem;
+            border-top: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://your-cdn.com/uniswap-logo-white.png" alt="UniSwap Logo" class="logo">
+        </div>
+        
+        <div class="content">
+            <h2 style="color: #059669; margin-bottom: 1rem;">Welcome to UniSwap, Professor!</h2>
+            
+            <p>You've been invited to join the University Hour Management System. Please click the button below to complete your registration:</p>
+            
+            <a href="{{registrationLink}}" class="button">Complete Registration</a>
+            
+            <p style="margin-bottom: 0.5rem;">This secure link will expire in <strong>24 hours</strong>.</p>
+            <p>If you didn't request this invitation, please ignore this email.</p>
+        </div>
+        
+        <div class="footer">
+            <p>© {{year}} UniSwap - University of Science and Technology HB<br>
+            All rights reserved</p>
+        </div>
+    </div>
+</body>
+</html>
