@@ -7,6 +7,7 @@ import adminRoutes from './src/routes/adminRoutes.js';
 import pool from './src/config/db.js'
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import surveillanceRoutes from './src/routes/surveillanceRoutes.js';
 
 const prisma = new PrismaClient();
@@ -16,17 +17,27 @@ const app = express();
 //middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended:true }));
-app.use(session({secret: 'keyboard cat', resave: false, saveUninitialized: true}));
+app.use(cookieParser());
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'keyboard cat',
+  resave: false,
+  saveUninitialized: true,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax'
+  }
+}));
 app.use(passport.initialize());
 app.use(passport.session());
-
 
 // CORS configuration
 app.use(cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    credentials: true
-  }));
-
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 //test database connection
 const users = await prisma.user.findMany();

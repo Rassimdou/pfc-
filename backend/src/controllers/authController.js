@@ -107,20 +107,31 @@ export const handleGoogleAuth = async (profile) => {
 
 export const setPassword = async (req, res) => {
   try {
-    const { email, password, firstName, lastName, department } = req.body;
+    const { email, password, firstName, lastName, phoneNumber, isGoogleSignup } = req.body;
 
     // Validate input
-    if (!password || password.length < 8) {
-      return res.status(400).json({ 
+    if (!isGoogleSignup) {
+      if (!password || password.length < 8) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Password must be at least 8 characters long'
+        });
+      }
+    }
+
+    if (!firstName || !lastName || !phoneNumber) {
+      return res.status(400).json({
         success: false,
-        message: 'Password must be at least 8 characters long'
+        message: 'First name, last name, and phone number are required'
       });
     }
 
-    if (!firstName || !lastName || !department) {
+    // Validate phone number format (basic validation)
+    const phoneRegex = /^\+?[\d\s-]{8,}$/;
+    if (!phoneRegex.test(phoneNumber)) {
       return res.status(400).json({
         success: false,
-        message: 'First name, last name, and department are required'
+        message: 'Invalid phone number format'
       });
     }
 
@@ -136,7 +147,7 @@ export const setPassword = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    const hashedPassword = password ? await bcrypt.hash(password, SALT_ROUNDS) : null;
 
     // Create or update user with additional information
     const updatedUser = await prisma.user.upsert({
@@ -146,7 +157,7 @@ export const setPassword = async (req, res) => {
         isVerified: true,
         firstName,
         lastName,
-        department
+        phoneNumber
       },
       create: {
         email,
@@ -154,8 +165,9 @@ export const setPassword = async (req, res) => {
         isVerified: true,
         firstName,
         lastName,
-        department,
-        role: 'TEACHER'
+        phoneNumber,
+        role: 'TEACHER',
+        name: `${firstName} ${lastName}`
       },
       select: {
         id: true,
@@ -163,7 +175,7 @@ export const setPassword = async (req, res) => {
         role: true,
         firstName: true,
         lastName: true,
-        department: true
+        phoneNumber: true
       }
     });
 
@@ -220,6 +232,7 @@ export const loginWithPassword = async (req, res) => {
       });
     }
 
+    // First check if user exists
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       select: {
@@ -227,7 +240,9 @@ export const loginWithPassword = async (req, res) => {
         email: true,
         password: true,
         role: true,
-        name: true
+        firstName: true,
+        lastName: true,
+        isVerified: true
       }
     });
 
@@ -239,6 +254,18 @@ export const loginWithPassword = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
+      });
+    }
+
+    // Check if user is a pending teacher
+    const pendingTeacher = await prisma.pendingTeacher.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (pendingTeacher && !user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: 'Please complete your registration first'
       });
     }
 
@@ -271,15 +298,13 @@ export const loginWithPassword = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
+    // Remove password from user object before sending
+    const { password: _, ...userWithoutPassword } = user;
+
     res.json({
       success: true,
       accessToken: tokens.accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      }
+      user: userWithoutPassword
     });
 
   } catch (error) {
@@ -288,6 +313,72 @@ export const loginWithPassword = async (req, res) => {
       success: false,
       message: 'Authentication failed',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+export const completeGoogleSignup = async (req, res) => {
+  try {
+    const { email, firstName, lastName, phoneNumber } = req.body;
+
+    // Validate input
+    if (!firstName || !lastName || !phoneNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'First name, last name, and phone number are required'
+      });
+    }
+
+    // Validate phone number format
+    const phoneRegex = /^\+?[\d\s-]{8,}$/;
+    if (!phoneRegex.test(phoneNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid phone number format'
+      });
+    }
+
+    const user = await prisma.user.update({
+      where: { email },
+      data: {
+        firstName,
+        lastName,
+        phoneNumber,
+        name: `${firstName} ${lastName}`
+      },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        firstName: true,
+        lastName: true,
+        phoneNumber: true
+      }
+    });
+
+    const token = jwt.sign(
+      { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({
+      success: true,
+      accessToken: token,
+      user
+    });
+
+  } catch (error) {
+    console.error('Google signup completion error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to complete signup'
     });
   }
 };

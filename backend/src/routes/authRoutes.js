@@ -2,13 +2,31 @@ import express from 'express';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
 import '../config/passport.js'; // Make sure this path is correct
-import { setPassword, loginWithPassword, checkEmailAuthorization, handleGoogleAuth } from '../controllers/authController.js';
+import { setPassword, loginWithPassword, checkEmailAuthorization, handleGoogleAuth, completeGoogleSignup } from '../controllers/authController.js';
 import { authenticate } from '../middleware/authMiddleware.js';
+import prisma from '../lib/prismaClient.js';
 
 const router = express.Router();
 
 // Email verification
 router.post('/check-email', checkEmailAuthorization);
+
+// Token verification endpoint
+router.get('/verify', authenticate, async (req, res) => {
+  try {
+    // If we get here, the token is valid (authenticate middleware passed)
+    res.json({
+      success: true,
+      user: req.user
+    });
+  } catch (error) {
+    console.error('Token verification error:', error);
+    res.status(401).json({
+      success: false,
+      message: 'Invalid token'
+    });
+  }
+});
 
 // Traditional password authentication
 router.post('/set-password', setPassword);
@@ -17,56 +35,55 @@ router.post('/login', loginWithPassword);
 // Google OAuth flow
 router.get(
   '/google',
-  passport.authenticate('google', { 
-    scope: ['profile', 'email'],
-    prompt: 'select_account'
-  })
+  (req, res, next) => {
+    console.log('Initiating Google OAuth...');
+    passport.authenticate('google', { 
+      scope: ['profile', 'email'],
+      prompt: 'select_account',
+      accessType: 'offline'
+    })(req, res, next);
+  }
 );
 
 router.get(
   '/google/callback',
-  passport.authenticate('google', { session: false }),
-  async (req, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Unauthorized: email not registered' 
-        });
+  (req, res, next) => {
+    console.log('Received Google callback...');
+    passport.authenticate('google', { 
+      session: false,
+      failureRedirect: `${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Authentication failed')}`
+    }, async (err, user, info) => {
+      try {
+        if (err) {
+          console.error('Google auth error:', err);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Authentication failed')}`);
+        }
+        
+        if (!user) {
+          console.error('No user returned from Google auth:', info);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(info?.message || 'Authentication failed')}`);
+        }
+
+        if (user.token) {
+          console.log('Authentication successful, redirecting with token');
+          // Store the token in a secure HTTP-only cookie
+          res.cookie('accessToken', user.token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 3600000 // 1 hour
+          });
+          
+          res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+        } else {
+          console.error('No token in user object');
+          res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Authentication failed')}`);
+        }
+      } catch (error) {
+        console.error('Error in Google callback:', error);
+        res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('An unexpected error occurred')}`);
       }
-
-      const user = await handleGoogleAuth(req.user);
-      
-      const token = jwt.sign(
-        { 
-          id: user.id, 
-          email: user.email, 
-          role: user.role 
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '1h' }
-      );
-
-      // Set refresh token cookie
-      const refreshToken = jwt.sign(
-        { id: user.id },
-        process.env.JWT_REFRESH_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      // Redirect to frontend with token
-      res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
-    } catch (error) {
-      console.error('Google callback error:', error);
-      res.redirect(`${process.env.FRONTEND_URL}/signup?error=${encodeURIComponent(error.message)}`);
-    }
+    })(req, res, next);
   }
 );
 
@@ -112,17 +129,28 @@ router.post('/refresh-token', async (req, res) => {
       { expiresIn: '1h' }
     );
 
+    // Set the new access token in a secure HTTP-only cookie
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 3600000 // 1 hour
+    });
+
     res.json({
       success: true,
-      accessToken: newAccessToken,
       user
     });
   } catch (error) {
+    console.error('Token refresh error:', error);
     res.status(401).json({ 
       success: false,
       message: 'Invalid refresh token' 
     });
   }
 });
+
+// Complete Google signup
+router.post('/complete-google-signup', completeGoogleSignup);
 
 export default router;

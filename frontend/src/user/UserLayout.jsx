@@ -1,18 +1,31 @@
 import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Card } from '@/ui/card';
 import { FileText, ShieldCheck, User, Menu, X } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 const navLinks = [
-  { to: '/user/surveillance', label: 'Surveillance', icon: ShieldCheck },
-  { to: '/user/files', label: 'My Files', icon: FileText },
-  { to: '/user/profile', label: 'Profile', icon: User },
+  { to: '/dashboard', label: 'Dashboard', icon: ShieldCheck },
+  { to: '/surveillance', label: 'Surveillance', icon: ShieldCheck },
+  { to: '/files', label: 'My Files', icon: FileText },
+  { to: '/profile', label: 'Profile', icon: User },
 ];
 
 export default function UserLayout({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+
+  // Check authentication
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Please log in to access this page');
+      navigate('/login');
+      return;
+    }
+  }, [navigate]);
 
   // Handle responsive behavior
   useEffect(() => {
@@ -26,6 +39,13 @@ export default function UserLayout({ children }) {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login');
+    toast.success('Logged out successfully');
+  };
 
   return (
     <div className="min-h-screen flex bg-gray-50 relative">
@@ -64,6 +84,15 @@ export default function UserLayout({ children }) {
             </Link>
           ))}
         </nav>
+        <div className="mt-auto">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-md font-medium text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <X className="w-5 h-5" />
+            Logout
+          </button>
+        </div>
       </aside>
 
       {/* Overlay for mobile */}

@@ -15,20 +15,45 @@ export default function Signup() {
     firstName: "",
     lastName: "",
     email: "",
-    department: "",
+    phoneNumber: "",
     password: "",
     confirmPassword: ""
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [emailVerified, setEmailVerified] = useState(false);
+  const [isGoogleSignup, setIsGoogleSignup] = useState(false);
+  const [googleData, setGoogleData] = useState(null);
 
   useEffect(() => {
-    // Check for error from Google OAuth
-    const error = searchParams.get('error');
-    if (error) {
-      setError(decodeURIComponent(error));
-      toast.error(decodeURIComponent(error));
+    // Check for Google OAuth callback
+    const token = searchParams.get('token');
+    const googleError = searchParams.get('error');
+    
+    if (token) {
+      try {
+        // Store the token
+        localStorage.setItem('token', token);
+        
+        // Decode the token to get user data
+        const userData = JSON.parse(atob(token.split('.')[1]));
+        setGoogleData(userData);
+        setFormData(prev => ({
+          ...prev,
+          email: userData.email,
+          firstName: userData.firstName || '',
+          lastName: userData.lastName || ''
+        }));
+        setEmailVerified(true);
+        setIsGoogleSignup(true);
+      } catch (error) {
+        console.error('Error parsing token:', error);
+        setError('Invalid authentication data');
+        toast.error('Invalid authentication data');
+      }
+    } else if (googleError) {
+      setError(decodeURIComponent(googleError));
+      toast.error(decodeURIComponent(googleError));
     }
   }, [searchParams]);
 
@@ -40,25 +65,24 @@ export default function Signup() {
     }));
   };
 
-  const handleDepartmentChange = (value) => {
-    setFormData(prev => ({
-      ...prev,
-      department: value
-    }));
-  };
-
   const validateForm = () => {
     if (!formData.firstName || !formData.lastName || !formData.email || 
-        !formData.department || !formData.password || !formData.confirmPassword) {
+        !formData.phoneNumber || (!isGoogleSignup && (!formData.password || !formData.confirmPassword))) {
       setError("All fields are required");
       return false;
     }
-    if (formData.password !== formData.confirmPassword) {
+    if (!isGoogleSignup && formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
       return false;
     }
-    if (formData.password.length < 8) {
+    if (!isGoogleSignup && formData.password.length < 8) {
       setError("Password must be at least 8 characters long");
+      return false;
+    }
+    // Validate phone number format
+    const phoneRegex = /^\+?[\d\s-]{8,}$/;
+    if (!phoneRegex.test(formData.phoneNumber)) {
+      setError("Invalid phone number format");
       return false;
     }
     return true;
@@ -100,18 +124,38 @@ export default function Signup() {
     try {
       setLoading(true);
       
-      const response = await axios.post('/api/auth/set-password', {
-        email: formData.email,
-        password: formData.password,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        department: formData.department
-      });
+      // If it's a Google signup, we don't need to set a password
+      if (isGoogleSignup) {
+        const response = await axios.post(`${import.meta.env.VITE_API_URL}/auth/complete-google-signup`, {
+          email: formData.email,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phoneNumber: formData.phoneNumber
+        });
 
-      if (response.data.success) {
-        localStorage.setItem('token', response.data.accessToken);
-        toast.success('Account created successfully!');
-        navigate('/dashboard');
+        if (response.data.success) {
+          localStorage.setItem('token', response.data.accessToken);
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+          toast.success('Account created successfully!');
+          navigate('/dashboard');
+        }
+      } else {
+        // Regular email/password signup
+        const response = await axios.post(`${import.meta.env.VITE_API_URL}/auth/set-password`, {
+          email: formData.email,
+          password: formData.password,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phoneNumber: formData.phoneNumber,
+          isGoogleSignup: false
+        });
+
+        if (response.data.success) {
+          localStorage.setItem('token', response.data.accessToken);
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+          toast.success('Account created successfully!');
+          navigate('/dashboard');
+        }
       }
     } catch (err) {
       const errorMessage = err.response?.data?.message || "An error occurred during signup";
@@ -123,7 +167,7 @@ export default function Signup() {
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = '/api/auth/google';
+    window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
   };
 
   return (
@@ -146,25 +190,27 @@ export default function Signup() {
             </div>
           )}
 
-          <div className="space-y-4">
-            <Button 
-              type="button" 
-              className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
-              onClick={handleGoogleSignup}
-            >
-              <img src="/google-icon.svg" alt="Google" className="w-5 h-5 mr-2" />
-              Continue with Google
-            </Button>
+          {!isGoogleSignup && (
+            <div className="space-y-4">
+              <Button 
+                type="button" 
+                className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+                onClick={handleGoogleSignup}
+              >
+                <img src="/google-icon.svg" alt="Google" className="w-5 h-5 mr-2" />
+                Continue with Google
+              </Button>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-gray-500">Or continue with email</span>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-gray-500">Or continue with email</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -201,7 +247,7 @@ export default function Signup() {
                   onChange={handleChange}
                   disabled={emailVerified}
                 />
-                {!emailVerified && (
+                {!emailVerified && !isGoogleSignup && (
                   <Button 
                     type="button"
                     onClick={verifyEmail}
@@ -215,49 +261,42 @@ export default function Signup() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="department">Department</Label>
-              <Select 
-                onValueChange={handleDepartmentChange} 
-                value={formData.department}
-                disabled={!emailVerified}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cs">Computer Science</SelectItem>
-                  <SelectItem value="math">Mathematics</SelectItem>
-                  <SelectItem value="eng">Engineering</SelectItem>
-                  <SelectItem value="physics">Physics</SelectItem>
-                  <SelectItem value="chem">Chemistry</SelectItem>
-                  <SelectItem value="bio">Biology</SelectItem>
-                  <SelectItem value="business">Business</SelectItem>
-                  <SelectItem value="arts">Arts & Humanities</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="phoneNumber">Phone Number</Label>
               <Input 
-                id="password" 
-                type="password" 
-                value={formData.password}
+                id="phoneNumber" 
+                placeholder="+2130000000000" 
+                value={formData.phoneNumber}
                 onChange={handleChange}
                 disabled={!emailVerified}
               />
+              <p className="text-xs text-gray-500">Enter your phone number with country code (e.g., +2130000000000)</p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input 
-                id="confirmPassword" 
-                type="password" 
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                disabled={!emailVerified}
-              />
-            </div>
+            {!isGoogleSignup && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input 
+                    id="password" 
+                    type="password" 
+                    value={formData.password}
+                    onChange={handleChange}
+                    disabled={!emailVerified}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <Input 
+                    id="confirmPassword" 
+                    type="password" 
+                    value={formData.confirmPassword}
+                    onChange={handleChange}
+                    disabled={!emailVerified}
+                  />
+                </div>
+              </>
+            )}
 
             <Button 
               type="submit" 

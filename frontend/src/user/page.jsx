@@ -1,10 +1,84 @@
+import { useState, useEffect } from 'react';
 import { Button } from "@/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs"
 import { Calendar, Clock, Users, Bell, Settings, BookOpen, ArrowLeftRight, CheckCircle, XCircle } from "lucide-react"
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import api from '@/utils/axios';
+import { toast } from 'react-hot-toast';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    fetchUserData();
+    fetchAssignments();
+  }, [navigate]);
+
+  const fetchUserData = async () => {
+    try {
+      const userData = JSON.parse(localStorage.getItem('user'));
+      setUser(userData);
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+      toast.error('Failed to load user data');
+    }
+  };
+
+  const fetchAssignments = async () => {
+    try {
+      const response = await api.get('/api/surveillance');
+      setAssignments(response.data.data || []);
+      
+      // Check for new assignments (within the last 24 hours)
+      const newAssignments = response.data.data.filter(assignment => {
+        const assignmentDate = new Date(assignment.createdAt);
+        const now = new Date();
+        const hoursDiff = (now - assignmentDate) / (1000 * 60 * 60);
+        return hoursDiff <= 24;
+      });
+
+      if (newAssignments.length > 0) {
+        toast.success(`You have ${newAssignments.length} new surveillance assignment(s)!`);
+      }
+    } catch (error) {
+      console.error('Error fetching assignments:', error);
+      if (error.response?.status === 401) {
+        toast.error('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+      } else {
+        toast.error('Failed to load surveillance assignments');
+      }
+      setAssignments([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get upcoming assignments (next 24 hours)
+  const upcomingAssignments = assignments.filter(assignment => {
+    const assignmentDate = new Date(assignment.date);
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    return assignmentDate >= now && assignmentDate <= tomorrow;
+  });
+
+  // Get pending swap requests
+  const pendingSwaps = assignments.filter(assignment => 
+    assignment.swapRequest && assignment.swapRequest.status === 'PENDING'
+  );
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b bg-white">
@@ -14,78 +88,83 @@ export default function Dashboard() {
             <span className="text-xl font-bold">UniSwap</span>
           </div>
           <nav className="hidden md:flex gap-6">
-            <Link href="/dashboard" className="text-sm font-medium text-emerald-600 border-b-2 border-emerald-600 pb-1">
+            <Link to="/dashboard" className="text-sm font-medium text-emerald-600 border-b-2 border-emerald-600 pb-1">
               Dashboard
             </Link>
-            <Link href="/dashboard/schedule" className="text-sm font-medium hover:text-emerald-600">
-              My Schedule
+            <Link to="/surveillance" className="text-sm font-medium hover:text-emerald-600">
+              Surveillance
             </Link>
-            <Link href="/dashboard/swaps" className="text-sm font-medium hover:text-emerald-600">
+            <Link to="/swaps" className="text-sm font-medium hover:text-emerald-600">
               Swap Requests
-            </Link>
-            <Link href="/dashboard/colleagues" className="text-sm font-medium hover:text-emerald-600">
-              Colleagues
             </Link>
           </nav>
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="h-5 w-5" />
-              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
-                3
-              </span>
+              {pendingSwaps.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
+                  {pendingSwaps.length}
+                </span>
+              )}
             </Button>
             <Button variant="ghost" size="icon">
               <Settings className="h-5 w-5" />
             </Button>
             <div className="flex items-center gap-2">
               <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-medium">
-                JP
+                {user?.firstName?.[0]}{user?.lastName?.[0]}
               </div>
-              <span className="hidden md:inline text-sm font-medium">Dr. Jane Porter</span>
+              <span className="hidden md:inline text-sm font-medium">
+                {user?.firstName} {user?.lastName}
+              </span>
             </div>
           </div>
         </div>
       </header>
+
       <main className="flex-1 bg-gray-50">
         <div className="container py-6 px-4">
           <div className="mb-6">
-            <h1 className="text-2xl font-bold">Welcome back, Dr. Porter</h1>
+            <h1 className="text-2xl font-bold">Welcome back, {user?.firstName}</h1>
             <p className="text-gray-500">Here's what's happening with your teaching schedule</p>
           </div>
 
           <div className="grid gap-6 md:grid-cols-3">
             <Card className="hover:shadow-md transition-all duration-200">
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Upcoming Classes</CardTitle>
+                <CardTitle className="text-lg">Upcoming Surveillances</CardTitle>
                 <CardDescription>Your next 24 hours</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {[
-                    { day: "Today", time: "14:00 - 16:00", course: "Data Structures", room: "Room B-105" },
-                    { day: "Tomorrow", time: "09:00 - 11:00", course: "Algorithms", room: "Room C-302" },
-                  ].map((item, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-3 rounded-lg border p-3 transition-all hover:bg-emerald-50"
-                    >
-                      <div className="mt-0.5 rounded-full bg-emerald-100 p-1.5">
-                        <Clock className="h-4 w-4 text-emerald-600" />
-                      </div>
-                      <div>
-                        <div className="font-medium">
-                          {item.day}: {item.time}
+                  {loading ? (
+                    <div className="text-center py-4">Loading...</div>
+                  ) : upcomingAssignments.length === 0 ? (
+                    <div className="text-center py-4 text-gray-500">No upcoming surveillances</div>
+                  ) : (
+                    upcomingAssignments.map((assignment) => (
+                      <div
+                        key={assignment.id}
+                        className="flex items-start gap-3 rounded-lg border p-3 transition-all hover:bg-emerald-50"
+                      >
+                        <div className="mt-0.5 rounded-full bg-emerald-100 p-1.5">
+                          <Clock className="h-4 w-4 text-emerald-600" />
                         </div>
-                        <div className="text-sm text-gray-500">{item.course}</div>
-                        <div className="text-xs text-gray-400">{item.room}</div>
+                        <div>
+                          <div className="font-medium">
+                            {new Date(assignment.date).toLocaleDateString()}: {assignment.time}
+                          </div>
+                          <div className="text-sm text-gray-500">{assignment.module}</div>
+                          <div className="text-xs text-gray-400">{assignment.room}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
               <CardFooter>
-                <Button variant="ghost" className="w-full text-emerald-600">
-                  View Full Schedule
+                <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/surveillance')}>
+                  View All Surveillances
                 </Button>
               </CardFooter>
             </Card>
@@ -97,55 +176,45 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {[
-                    {
-                      from: "Dr. Michael Chen",
-                      course: "Calculus I",
-                      currentDay: "Monday, 10:00 - 12:00",
-                      proposedDay: "Tuesday, 14:00 - 16:00",
-                    },
-                    {
-                      from: "Prof. Sarah Johnson",
-                      course: "Intro to Programming",
-                      currentDay: "Thursday, 09:00 - 11:00",
-                      proposedDay: "Wednesday, 13:00 - 15:00",
-                    },
-                  ].map((item, index) => (
-                    <div
-                      key={index}
-                      className="flex flex-col gap-2 rounded-lg border p-3 transition-all hover:bg-emerald-50"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 rounded-full bg-emerald-100 p-1.5">
-                          <ArrowLeftRight className="h-4 w-4 text-emerald-600" />
+                  {loading ? (
+                    <div className="text-center py-4">Loading...</div>
+                  ) : pendingSwaps.length === 0 ? (
+                    <div className="text-center py-4 text-gray-500">No pending swap requests</div>
+                  ) : (
+                    pendingSwaps.map((swap) => (
+                      <div
+                        key={swap.id}
+                        className="flex flex-col gap-2 rounded-lg border p-3 transition-all hover:bg-emerald-50"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="mt-0.5 rounded-full bg-emerald-100 p-1.5">
+                            <ArrowLeftRight className="h-4 w-4 text-emerald-600" />
+                          </div>
+                          <div>
+                            <div className="font-medium">Swap Request</div>
+                            <div className="text-sm text-gray-500">{swap.module}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-medium">{item.from}</div>
-                          <div className="text-sm text-gray-500">{item.course}</div>
+                        <div className="text-xs text-gray-500 pl-9">
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> Current: {new Date(swap.date).toLocaleDateString()} {swap.time}
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-xs text-gray-500 pl-9">
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" /> Current: {item.currentDay}
-                        </div>
-                        <div className="flex items-center gap-1 mt-1">
-                          <Clock className="h-3 w-3" /> Proposed: {item.proposedDay}
+                        <div className="flex gap-2 pl-9 mt-1">
+                          <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700">
+                            <CheckCircle className="h-3 w-3 mr-1" /> Accept
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7">
+                            <XCircle className="h-3 w-3 mr-1" /> Decline
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex gap-2 pl-9 mt-1">
-                        <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700">
-                          <CheckCircle className="h-3 w-3 mr-1" /> Accept
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-7">
-                          <XCircle className="h-3 w-3 mr-1" /> Decline
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
               <CardFooter>
-                <Button variant="ghost" className="w-full text-emerald-600">
+                <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/swaps')}>
                   View All Requests
                 </Button>
               </CardFooter>
@@ -158,10 +227,10 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-2">
-                  <Button className="w-full justify-start bg-emerald-600 hover:bg-emerald-700">
+                  <Button className="w-full justify-start bg-emerald-600 hover:bg-emerald-700" onClick={() => navigate('/surveillance')}>
                     <ArrowLeftRight className="h-4 w-4 mr-2" /> Request New Swap
                   </Button>
-                  <Button variant="outline" className="w-full justify-start">
+                  <Button variant="outline" className="w-full justify-start" onClick={() => navigate('/surveillance')}>
                     <Calendar className="h-4 w-4 mr-2" /> View Calendar
                   </Button>
                   <Button variant="outline" className="w-full justify-start">
@@ -174,79 +243,8 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
-
-          <div className="mt-6">
-            <Tabs defaultValue="weekly">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Schedule Overview</h2>
-                <TabsList>
-                  <TabsTrigger value="weekly">Weekly View</TabsTrigger>
-                  <TabsTrigger value="monthly">Monthly View</TabsTrigger>
-                </TabsList>
-              </div>
-
-              <TabsContent value="weekly" className="mt-0">
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="grid grid-cols-7 gap-4">
-                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(
-                        (day, index) => (
-                          <div key={index} className="text-center font-medium">
-                            {day}
-                          </div>
-                        ),
-                      )}
-
-                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(
-                        (day, index) => (
-                          <div
-                            key={index}
-                            className={`min-h-[150px] rounded-lg border p-2 ${
-                              day === "Saturday" || day === "Sunday" ? "bg-gray-50" : ""
-                            }`}
-                          >
-                            {day === "Monday" && (
-                              <div className="mb-2 rounded bg-emerald-100 p-2 text-xs text-emerald-700">
-                                <div className="font-medium">Computer Science 101</div>
-                                <div>10:00 - 12:00</div>
-                                <div>Room A-201</div>
-                              </div>
-                            )}
-
-                            {day === "Wednesday" && (
-                              <div className="mb-2 rounded bg-emerald-100 p-2 text-xs text-emerald-700">
-                                <div className="font-medium">Data Structures</div>
-                                <div>14:00 - 16:00</div>
-                                <div>Room B-105</div>
-                              </div>
-                            )}
-
-                            {day === "Thursday" && (
-                              <div className="mb-2 rounded bg-emerald-100 p-2 text-xs text-emerald-700">
-                                <div className="font-medium">Algorithms</div>
-                                <div>09:00 - 11:00</div>
-                                <div>Room C-302</div>
-                              </div>
-                            )}
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="monthly">
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="text-center text-gray-500">Monthly calendar view will be displayed here</div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          </div>
         </div>
       </main>
     </div>
-  )
+  );
 }

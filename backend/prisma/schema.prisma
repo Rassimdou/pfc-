@@ -14,10 +14,14 @@ model User {
   id              Int                     @id @default(autoincrement())
   email           String                  @unique
   name            String
+  firstName       String?                 // Added firstName field
+  lastName        String?                 // Added lastName field
   password        String?
   googleId        String?                 @unique
   role            UserRole                @default(PROFESSOR)
-  speciality      Speciality?             @relation(fields: [specialityId], references: [id])
+  isVerified      Boolean                 @default(false)  // Added isVerified field
+  phoneNumber     String?                 // Added phone number field
+  specialitiesTaught  Speciality[]  // Array for many specialities
   specialityId    Int?
   taughtModules   Module[]                @relation("ProfessorModules")
   createdAt       DateTime                @default(now())
@@ -151,6 +155,7 @@ model SurveillanceAssignment {
   time          String                  // Format: "HH:MM"
   module        String
   room          String
+  roomType      RoomType               // Added room type
   isResponsible Boolean                 @default(false)
   canSwap       Boolean                 @default(true)
   createdAt     DateTime                @default(now())
@@ -271,4 +276,10 @@ model PendingTeacher {
   // Relationships
   addedBy   User     @relation(fields: [adminId], references: [id])
   adminId   Int
+}
+
+enum RoomType {
+  SALLE_TP
+  SALLE_TD
+  SALLE_COURS
 }

@@ -1,9 +1,36 @@
-import React, { useState } from "react";
-import { Link, useLocation, Outlet } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
+import { toast } from "react-hot-toast";
 
 export default function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Check authentication and role
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user'));
+    
+    if (!token) {
+      toast.error('Please log in to access this page');
+      navigate('/login');
+      return;
+    }
+
+    if (user?.role !== 'ADMIN') {
+      toast.error('You do not have permission to access this page');
+      navigate('/dashboard');
+      return;
+    }
+  }, [navigate]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login');
+    toast.success('Logged out successfully');
+  };
 
   const navItems = [
     {
@@ -19,13 +46,23 @@ export default function AdminLayout() {
       ),
     },
     {
+      title: "Surveillance",
+      href: "/admin/surveillance",
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+      ),
+    },
+    {
       title: "Exchange History",
       href: "/admin/exchanges",
       icon: (
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-          <path d="m18 7-6-4-6 4V17l6 4 6-4V7z"></path>
-          <path d="M6 7l6 4 6-4"></path>
-          <path d="M12 11v10"></path>
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+          <path d="M3 3v5h5"></path>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+          <path d="M16 21h5v-5"></path>
         </svg>
       ),
     },
@@ -136,7 +173,10 @@ export default function AdminLayout() {
             })}
           </nav>
           <div className="p-4 border-t">
-            <button className="w-full flex items-center justify-start px-3 py-2 rounded-md text-sm font-medium text-red-500 hover:text-red-600 hover:bg-red-50">
+            <button 
+              onClick={handleLogout}
+              className="w-full flex items-center justify-start px-3 py-2 rounded-md text-sm font-medium text-red-500 hover:text-red-600 hover:bg-red-50"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 mr-2">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                 <polyline points="16 17 21 12 16 7"></polyline>

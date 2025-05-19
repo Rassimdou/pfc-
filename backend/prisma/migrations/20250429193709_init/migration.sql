@@ -39,7 +39,7 @@ CREATE TABLE `Section` (
 -- CreateTable
 CREATE TABLE `ScheduleSlot` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
-    `dayOfWeek` INTEGER NOT NULL,
+    `dayOfWeek` ENUM('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY') NOT NULL,
     `startTime` VARCHAR(191) NOT NULL,
     `endTime` VARCHAR(191) NOT NULL,
     `room` VARCHAR(191) NOT NULL,

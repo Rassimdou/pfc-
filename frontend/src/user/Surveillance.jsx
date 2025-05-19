@@ -2,245 +2,354 @@ import { useEffect, useState, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/ui/card';
 import { Input } from '@/ui/input';
 import { Button } from '@/ui/button';
-import { BadgeCheck, Lock, Upload, FileText } from 'lucide-react';
+import { BadgeCheck, Lock, Upload, FileText, Calendar, Clock, Users, ArrowLeftRight, CheckCircle, XCircle, Search, AlertCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import UserLayout from './UserLayout';
 import api from '@/utils/axios';
-import axios from 'axios';
+import { useNavigate } from "react-router-dom";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+
 export default function Surveillance() {
+  const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showSwappableOnly, setShowSwappableOnly] = useState(false);
-  const [files, setFiles] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef();
+  const [selectedAssignment, setSelectedAssignment] = useState(null);
+  const [showSwapDialog, setShowSwapDialog] = useState(false);
+  const [targetAssignment, setTargetAssignment] = useState('');
+  const [pendingSwaps, setPendingSwaps] = useState([]);
 
   useEffect(() => {
     fetchAssignments();
-    fetchFiles();
   }, []);
 
   const fetchAssignments = async () => {
-    setLoading(true);
     try {
-      const res = await axios.get('/surveillance');
-      setAssignments(res.data.data || []);
+      const response = await api.get('/api/surveillance');
+      if (response.data) {
+        setAssignments(response.data.data || []);
+        // Filter assignments that are pending swaps
+        const pending = response.data.data.filter(assignment => 
+          assignment.status === "PENDING_SWAP"
+        );
+        setPendingSwaps(pending);
+      } else {
+        toast.error('Failed to load surveillance assignments');
+        setAssignments([]);
+      }
     } catch (error) {
       console.error('Error fetching assignments:', error);
-      toast.error('Erreur lors du chargement des surveillances');
+      if (error.response?.status === 401) {
+        toast.error('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to load surveillance assignments');
+      }
       setAssignments([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchFiles = async () => {
-    try {
-      const res = await axios.get('/surveillance/files');
-      setFiles(res.data.files || []);
-    } catch (error) {
-      console.error('Error fetching files:', error);
-      setFiles([]);
-    }
-  };
-
-  const [selectedFile, setSelectedFile] = useState(null);
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!file.name.endsWith('.doc')) {
-      toast.error('Veuillez sélectionner un fichier .doc');
+  const handleSwapRequest = async () => {
+    if (!selectedAssignment || !targetAssignment) {
+      toast.error('Please select both assignments');
       return;
     }
-    setSelectedFile(file);
-  };
-  
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+
     try {
-      await api.post('/surveillance/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      await api.post(`/surveillance/${selectedAssignment.id}/swap-request`, {
+        targetAssignmentId: targetAssignment
       });
-      toast.success('Fichier envoyé et traité avec succès');
-      fetchFiles();
+      toast.success('Swap request sent successfully');
+      setShowSwapDialog(false);
       fetchAssignments();
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error) {
-      console.error('Error uploading file:', error);
-      toast.error('Erreur lors de l\'envoi ou du traitement du fichier');
-    } finally {
-      setUploading(false);
+      console.error('Error sending swap request:', error);
+      toast.error(error.response?.data?.message || 'Failed to send swap request');
     }
   };
 
-  const filtered = assignments.filter(a => {
-    if (showSwappableOnly && (!a.canSwap || a.isResponsible)) return false;
-    if (!search) return true;
-    return (
-      a.module?.toLowerCase().includes(search.toLowerCase()) ||
-      a.room?.toLowerCase().includes(search.toLowerCase()) ||
-      a.time?.toLowerCase().includes(search.toLowerCase()) ||
-      (a.date && new Date(a.date).toLocaleDateString('fr-FR').includes(search))
+  const handleAcceptSwap = async (swapId) => {
+    try {
+      await api.post(`/surveillance/swap/${swapId}/accept`);
+      toast.success('Swap request accepted');
+      fetchAssignments();
+    } catch (error) {
+      console.error('Error accepting swap:', error);
+      toast.error('Failed to accept swap request');
+    }
+  };
+
+  const handleDeclineSwap = async (swapId) => {
+    try {
+      await api.post(`/surveillance/swap/${swapId}/decline`);
+      toast.success('Swap request declined');
+      fetchAssignments();
+    } catch (error) {
+      console.error('Error declining swap:', error);
+      toast.error('Failed to decline swap request');
+    }
+  };
+
+  const handleCancelSwap = async (swapId) => {
+    try {
+      await api.post(`/surveillance/swap/${swapId}/cancel`);
+      toast.success('Swap request cancelled');
+      fetchAssignments();
+    } catch (error) {
+      console.error('Error cancelling swap:', error);
+      toast.error('Failed to cancel swap request');
+    }
+  };
+
+  // Filter assignments based on search term and swappable filter
+  const filteredAssignments = assignments.filter(assignment => {
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = (
+      assignment.module.toLowerCase().includes(searchLower) ||
+      assignment.room.toLowerCase().includes(searchLower) ||
+      new Date(assignment.date).toLocaleDateString().includes(searchLower) ||
+      assignment.time.toLowerCase().includes(searchLower)
     );
+
+    if (showSwappableOnly) {
+      return matchesSearch && assignment.canSwap && !assignment.isResponsible;
+    }
+
+    return matchesSearch;
   });
 
   return (
     <UserLayout>
-      <div className="space-y-8">
-        {/* Upload Card */}
-        <Card>
-          <CardHeader className="flex flex-row items-center gap-4">
-            <Upload className="w-8 h-8 text-emerald-600" />
-            <div>
-              <CardTitle>Ajouter ma convocation de surveillance</CardTitle>
-              <CardDescription>Envoyez votre fichier .doc de convocation. Il sera automatiquement analysé et affiché ci-dessous.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center gap-4">
-                <input
-                  type="file"
-                  accept=".doc"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  disabled={uploading}
-                  className="hidden"
-                  id="file-upload"
-                />
-                <label
-                  htmlFor="file-upload"
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-lg cursor-pointer hover:bg-emerald-100 transition-colors"
-                >
-                  <Upload className="w-5 h-5" />
-                  <span>Select File</span>
-                </label>
-                {selectedFile && (
-                  <Button
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                    onClick={handleUpload}
-                    disabled={uploading}
-                  >
-                    {uploading ? 'Uploading...' : 'Upload & Process'}
-                  </Button>
-                )}
-              </div>
-              {selectedFile && (
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <FileText className="w-4 h-4" />
-                  <span>{selectedFile.name}</span>
-                </div>
-              )}
-            </div>
-          </CardContent>
-          <CardFooter>
-            {uploading && <span className="text-emerald-600">Envoi et traitement en cours...</span>}
-          </CardFooter>
-        </Card>
-
-        {/* Uploaded Files List */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Mes fichiers envoyés</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {files.length === 0 ? (
-              <div className="text-gray-500">Aucun fichier envoyé.</div>
-            ) : (
-              <ul className="space-y-2">
-                {files.map(f => (
-                  <li key={f.id} className="flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-emerald-600" />
-                    <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">{f.originalName}</a>
-                    <span className="text-xs text-gray-400 ml-2">{f.uploadedAt ? new Date(f.uploadedAt).toLocaleString('fr-FR') : ''}</span>
-                  </li>
+      <div className="container mx-auto py-6 space-y-6">
+        {pendingSwaps.length > 0 && (
+          <Card className="bg-blue-50 border-blue-200">
+            <CardHeader>
+              <CardTitle className="text-blue-700 flex items-center gap-2">
+                <AlertCircle className="h-5 w-5" />
+                Pending Swap Requests
+              </CardTitle>
+              <CardDescription>You have {pendingSwaps.length} pending swap request(s)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {pendingSwaps.map(swap => (
+                  <div key={swap.id} className="flex items-center justify-between p-4 bg-white rounded-lg border">
+                    <div>
+                      <div className="font-medium">{swap.module}</div>
+                      <div className="text-sm text-gray-500">
+                        {new Date(swap.date).toLocaleDateString()} at {swap.time}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700"
+                        onClick={() => handleAcceptSwap(swap.swapRequest.id)}
+                      >
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Accept
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDeclineSwap(swap.swapRequest.id)}
+                      >
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
                 ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Assignments Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Mes convocations de surveillance</CardTitle>
+            <CardTitle>My Surveillance Assignments</CardTitle>
             <CardDescription>
-              Retrouvez ici vos surveillances d'examens. Les surveillances responsables ne sont pas échangeables.
+              View and manage your surveillance duties. Responsible assignments cannot be swapped.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col md:flex-row gap-4 mb-4">
-              <Input
-                placeholder="Filtrer par module, salle, date..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="md:w-1/2"
-              />
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                <Input
+                  placeholder="Search by module, room, date, or time..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={showSwappableOnly}
                   onChange={e => setShowSwappableOnly(e.target.checked)}
                 />
-                Afficher seulement les surveillances échangeables
+                Show only swappable assignments
               </label>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border rounded-md">
-                <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Heure</th>
-                    <th className="px-4 py-2 text-left">Module</th>
-                    <th className="px-4 py-2 text-left">Salle</th>
-                    <th className="px-4 py-2 text-left">Responsable</th>
-                    <th className="px-4 py-2 text-left">Échange</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={6} className="text-center py-4">Chargement...</td></tr>
-                  ) : filtered.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-4">Aucune surveillance trouvée</td></tr>
-                  ) : (
-                    filtered.map(a => (
-                      <tr key={a.id} className="border-b">
-                        <td className="px-4 py-2">{a.date ? new Date(a.date).toLocaleDateString('fr-FR') : ''}</td>
-                        <td className="px-4 py-2">{a.time}</td>
-                        <td className="px-4 py-2">{a.module}</td>
-                        <td className="px-4 py-2">{a.room}</td>
-                        <td className="px-4 py-2">
-                          {a.isResponsible ? (
-                            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><Lock className="w-4 h-4" /> Oui</span>
-                          ) : 'Non'}
-                        </td>
-                        <td className="px-4 py-2">
-                          {a.isResponsible ? (
-                            <span className="text-gray-400">Non échangeable</span>
-                          ) : a.swapWithId ? (
-                            <span className="inline-flex items-center gap-1 text-blue-700"><BadgeCheck className="w-4 h-4" />Échangé</span>
-                          ) : a.canSwap ? (
-                            <Button size="sm" variant="outline" disabled>
-                              Demander un échange {/* Placeholder for swap action */}
-                            </Button>
-                          ) : (
-                            <span className="text-gray-400">Non échangeable</span>
-                          )}
+
+            <div className="rounded-md border">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Date</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Role</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr>
+                        <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                          Loading assignments...
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : filteredAssignments.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                          No surveillance assignments found
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAssignments.map(assignment => (
+                        <tr key={assignment.id} className="border-b">
+                          <td className="px-4 py-2">
+                            {new Date(assignment.date).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-2">{assignment.time}</td>
+                          <td className="px-4 py-2">{assignment.module}</td>
+                          <td className="px-4 py-2">{assignment.room}</td>
+                          <td className="px-4 py-2">
+                            {assignment.isResponsible ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+                                <Lock className="w-4 h-4" /> Responsible
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">Assistant</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {assignment.swapRequest ? (
+                              <span className="inline-flex items-center gap-1 text-blue-700">
+                                <FileText className="w-4 h-4" />
+                                {assignment.swapRequest.status === 'PENDING' ? 'Pending Swap' :
+                                 assignment.swapRequest.status === 'APPROVED' ? 'Swapped' :
+                                 assignment.swapRequest.status === 'REJECTED' ? 'Rejected' :
+                                 'Cancelled'}
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">Active</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {!assignment.isResponsible && assignment.canSwap && !assignment.swapRequest && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedAssignment(assignment);
+                                  setShowSwapDialog(true);
+                                }}
+                              >
+                                <ArrowLeftRight className="h-4 w-4 mr-1" />
+                                Request Swap
+                              </Button>
+                            )}
+                            {assignment.swapRequest?.status === 'PENDING' && 
+                             assignment.swapRequest.fromAssignmentId === assignment.id && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleCancelSwap(assignment.swapRequest.id)}
+                              >
+                                Cancel Request
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </CardContent>
         </Card>
+
+        <Dialog open={showSwapDialog} onOpenChange={setShowSwapDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Request Swap</DialogTitle>
+              <DialogDescription>
+                Select another assignment to swap with your current assignment
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Your Assignment</label>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <div className="font-medium">{selectedAssignment?.module}</div>
+                  <div className="text-sm text-gray-500">
+                    {selectedAssignment?.date && new Date(selectedAssignment.date).toLocaleDateString()} at {selectedAssignment?.time}
+                  </div>
+                  <div className="text-sm text-gray-500">Room: {selectedAssignment?.room}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Select Assignment to Swap With</label>
+                <Select value={targetAssignment} onValueChange={setTargetAssignment}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an assignment" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignments
+                      .filter(a => 
+                        a.id !== selectedAssignment?.id && 
+                        a.canSwap && 
+                        !a.isResponsible &&
+                        !a.swapRequest
+                      )
+                      .map(assignment => (
+                        <SelectItem key={assignment.id} value={assignment.id.toString()}>
+                          {assignment.module} - {new Date(assignment.date).toLocaleDateString()} at {assignment.time}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowSwapDialog(false)}>
+                Cancel
+              </Button>
+              <Button 
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleSwapRequest}
+                disabled={!targetAssignment}
+              >
+                Send Swap Request
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </UserLayout>
   );

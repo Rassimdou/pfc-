@@ -28,7 +28,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/ui/dialog"
-import axios from 'axios';
+import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
 
 export default function TeachersManagement() {
@@ -56,24 +56,14 @@ export default function TeachersManagement() {
   const fetchTeachers = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        toast.error('Please log in first');
-        navigate('/login');
-        return;
-      }
-
-      const response = await axios.get('http://localhost:5000/api/admin/teachers', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await api.get('/admin/teachers');
       setTeachers(response.data.data || []);
     } catch (error) {
       console.error('Error fetching teachers:', error);
       if (error.response?.status === 401) {
-        toast.error('Please log in as an administrator');
+        toast.error('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
         navigate('/login');
       } else {
         toast.error('Failed to fetch teachers');
@@ -92,11 +82,7 @@ export default function TeachersManagement() {
         return;
       }
 
-      const response = await axios.post('http://localhost:5000/api/admin/teachers', newTeacher, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await api.post('/admin/teachers', newTeacher);
 
       if (response.data.success) {
         toast.success('Invitation sent successfully');
@@ -108,7 +94,14 @@ export default function TeachersManagement() {
       }
     } catch (error) {
       console.error('Error adding teacher:', error);
-      toast.error(error.response?.data?.message || 'Failed to send invitation');
+      if (error.response?.status === 401) {
+        toast.error('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to send invitation');
+      }
     }
   };
 
@@ -122,31 +115,30 @@ export default function TeachersManagement() {
   const handleDeleteTeacher = async (id, type) => {
     if (window.confirm('Are you sure you want to delete this teacher?')) {
       try {
-        let url = `http://localhost:5000/api/admin/teachers/${id}`;
+        let url = `/admin/teachers/${id}`;
         if (type === 'pending') {
-          url = `http://localhost:5000/api/admin/pending-teachers/${id}`;
+          url = `/admin/pending-teachers/${id}`;
         }
-        await axios.delete(url, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
+        await api.delete(url);
         toast.success('Teacher deleted successfully');
         fetchTeachers();
       } catch (error) {
         console.error('Error deleting teacher:', error);
-        toast.error('Failed to delete teacher');
+        if (error.response?.status === 401) {
+          toast.error('Session expired. Please log in again.');
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          navigate('/login');
+        } else {
+          toast.error('Failed to delete teacher');
+        }
       }
     }
   };
 
   const handleResendInvitation = async (email) => {
     try {
-      const response = await axios.post('http://localhost:5000/api/admin/teachers/resend-invitation', { email }, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await api.post('/admin/teachers/resend-invitation', { email });
 
       if (response.data.success) {
         toast.success('Invitation resend successfully');
