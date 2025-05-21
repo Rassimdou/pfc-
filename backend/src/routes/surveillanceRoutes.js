@@ -7,6 +7,7 @@ import prisma from '../lib/prismaClient.js';
 import mammoth from 'mammoth';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
+import { JSDOM } from 'jsdom';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,69 +30,295 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['.doc', '.docx'];
+    const allowedTypes = ['.doc', '.docx', '.pdf', '.html', '.htm']; // Added more formats
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedTypes.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('Only Microsoft Word files are allowed'));
+      cb(new Error('Only Microsoft Word, PDF, and HTML files are allowed'));
     }
   }
 });
 
-// Extract text from Word document
-const extractText = (filePath) => new Promise((resolve, reject) => {
-  mammoth.extractRawText({ path: filePath })
-    .then(result => resolve(result.value))
-    .catch(error => reject(error));
-});
+// Extract content from document
+async function extractDocumentContent(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (ext === '.doc' || ext === '.docx') {
+    // For Word documents, extract both text and HTML
+    const [textResult, htmlResult] = await Promise.all([
+      mammoth.extractRawText({ path: filePath }),
+      mammoth.convertToHtml({ path: filePath })
+    ]);
+    
+    return {
+      text: textResult.value,
+      html: htmlResult.value
+    };
+  } else if (ext === '.html' || ext === '.htm') {
+    // For HTML files, read the content directly
+    const html = fs.readFileSync(filePath, 'utf8');
+    const dom = new JSDOM(html);
+    return {
+      text: dom.window.document.body.textContent,
+      html: html
+    };
+  } else if (ext === '.pdf') {
+    // For PDF files, you would need a PDF parsing library
+    // This is a placeholder for PDF parsing
+    throw new Error('PDF parsing not implemented yet');
+  } else {
+    throw new Error('Unsupported file format');
+  }
+}
 
-// Parse the extracted text into structured data
-function parseScheduleText(text) {
+// Parse surveillance assignments from document
+function parseExamSchedule(content) {
+  // First try to parse from HTML if available
+  if (content.html) {
+    const htmlAssignments = parseTableFromHtml(content.html);
+    if (htmlAssignments.length > 0) {
+      return htmlAssignments;
+    }
+  }
+  
+  // Fall back to text parsing
+  return parseTableFromText(content.text);
+}
+
+// Parse table from HTML content
+function parseTableFromHtml(html) {
+  const assignments = [];
+  const dom = new JSDOM(html);
+  const tables = dom.window.document.querySelectorAll('table');
+  
+  // Find the table with date, time, module, and room columns
+  for (const table of tables) {
+    const rows = table.querySelectorAll('tr');
+    let headerRow = rows[0];
+    let headerCells = headerRow?.querySelectorAll('th, td');
+    
+    // Check if this table has our expected headers
+    const headerTexts = Array.from(headerCells || []).map(cell => cell.textContent.trim().toLowerCase());
+    const hasDateHeader = headerTexts.some(text => text.includes('date'));
+    const hasTimeHeader = headerTexts.some(text => 
+      text.includes('horaire') || text.includes('heure') || text.includes('time')
+    );
+    const hasModuleHeader = headerTexts.some(text => text.includes('module'));
+    const hasRoomHeader = headerTexts.some(text => 
+      text.includes('local') || text.includes('salle') || text.includes('room')
+    );
+    
+    if (hasDateHeader && hasTimeHeader && hasModuleHeader && hasRoomHeader) {
+      // Found our table! Now extract data from each row
+      for (let i = 1; i < rows.length; i++) {
+        const cells = rows[i].querySelectorAll('td');
+        if (cells.length >= 4) {
+          const date = cells[0].textContent.trim();
+          const time = cells[1].textContent.trim();
+          const module = cells[2].textContent.trim();
+          const room = cells[3].textContent.trim();
+          
+          if (date && time && module && room) {
+            // Format date properly
+            let formattedDate = formatDate(date);
+            
+            // Determine room type
+            const roomType = determineRoomType(room);
+            
+            assignments.push({
+              date: formattedDate,
+              time: time,
+              module: module,
+              room: room,
+              roomType
+            });
+          }
+        }
+      }
+      
+      if (assignments.length > 0) {
+        return assignments;
+      }
+    }
+  }
+  
+  return assignments;
+}
+
+// Parse table from text content
+function parseTableFromText(text) {
   const lines = text.split('\n').map(line => line.trim()).filter(line => line);
   const assignments = [];
-  let currentDate = null;
-  let currentTime = null;
-
-  for (const line of lines) {
-    // Try to match date pattern (e.g., "Date: 2024-04-30")
-    const dateMatch = line.match(/Date:\s*(\d{4}-\d{2}-\d{2})/i);
-    if (dateMatch) {
-      currentDate = dateMatch[1];
+  
+  // Find the table section in the text
+  let inTable = false;
+  let headerFound = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Check if we've reached the table header
+    const isHeaderLine = 
+      (line.toLowerCase().includes('date') && 
+       (line.toLowerCase().includes('horaire') || line.toLowerCase().includes('heure')) && 
+       line.toLowerCase().includes('module') && 
+       (line.toLowerCase().includes('local') || line.toLowerCase().includes('salle')));
+    
+    if (!headerFound && isHeaderLine) {
+      headerFound = true;
+      inTable = true;
       continue;
     }
-
-    // Try to match time pattern (e.g., "Time: 09:00")
-    const timeMatch = line.match(/Time:\s*(\d{2}:\d{2})/i);
-    if (timeMatch) {
-      currentTime = timeMatch[1];
+    
+    // Skip lines until we find the header
+    if (!headerFound) {
       continue;
     }
-
-    // Try to match module and room pattern
-    const moduleMatch = line.match(/([A-Za-z0-9\s]+)\s*-\s*([A-Za-z0-9\s]+)/);
-    if (moduleMatch && currentDate && currentTime) {
-      const [_, module, room] = moduleMatch;
+    
+    // Check if we've reached the end of the table
+    if (inTable && (line.startsWith('NB') || line.startsWith('N.B') || line.length < 10)) {
+      inTable = false;
+      continue;
+    }
+    
+    // Process table rows
+    if (inTable) {
+      // Skip empty rows
+      if (!line || line.trim() === '') continue;
       
-      // Determine room type based on room name
-      let roomType = 'SALLE_COURS';
-      if (room.toLowerCase().includes('tp')) {
-        roomType = 'SALLE_TP';
-      } else if (room.toLowerCase().includes('td')) {
-        roomType = 'SALLE_TD';
+      // Try to extract the 4 columns
+      const columns = extractColumnsFromLine(line);
+      
+      if (columns.length >= 4) {
+        const date = columns[0];
+        const time = columns[1];
+        const module = columns[2];
+        const room = columns[3];
+        
+        // Format date properly
+        let formattedDate = formatDate(date);
+        
+        // Determine room type
+        const roomType = determineRoomType(room);
+        
+        assignments.push({
+          date: formattedDate,
+          time: time,
+          module: module,
+          room: room,
+          roomType
+        });
       }
-
-      assignments.push({
-        date: currentDate,
-        time: currentTime,
-        module: module.trim(),
-        room: room.trim(),
-        roomType
-      });
     }
   }
-
+  
   return assignments;
+}
+
+// Extract columns from a text line
+function extractColumnsFromLine(line) {
+  // First try splitting by whitespace
+  let columns = line.split(/\s{2,}|\t/).filter(col => col.trim().length > 0);
+  
+  // If that didn't work well, try another approach
+  if (columns.length < 4) {
+    // Look for date patterns
+    const datePattern = /\d{2}[\.\/-]\d{2}[\.\/-]\d{4}|\d{2}[\.\/-]\d{2}[\.\/-]\d{2}/;
+    const dateMatch = line.match(datePattern);
+    
+    if (dateMatch) {
+      const dateStr = dateMatch[0];
+      const parts = line.split(dateStr);
+      
+      if (parts.length > 1) {
+        // The part after the date should contain time, module, and room
+        const afterDate = parts[1].trim();
+        
+        // Try to identify the time pattern
+        const timePattern = /\d{1,2}[:\.]?\d{2}/;
+        const timeMatch = afterDate.match(timePattern);
+        
+        if (timeMatch) {
+          const timeStr = timeMatch[0];
+          const timeIndex = afterDate.indexOf(timeStr);
+          const afterTime = afterDate.substring(timeIndex + timeStr.length).trim();
+          
+          // Now split the rest by spaces or other delimiters
+          const moduleAndRoom = afterTime.split(/\s{2,}|\t|–|-/).filter(part => part.trim().length > 0);
+          
+          if (moduleAndRoom.length >= 2) {
+            columns = [
+              dateStr,
+              timeStr,
+              moduleAndRoom[0].trim(),
+              moduleAndRoom[1].trim()
+            ];
+          } else if (moduleAndRoom.length === 1) {
+            // Try to split the single part into module and room
+            const parts = moduleAndRoom[0].split(/\s+/);
+            const halfIndex = Math.floor(parts.length / 2);
+            
+            columns = [
+              dateStr,
+              timeStr,
+              parts.slice(0, halfIndex).join(' ').trim(),
+              parts.slice(halfIndex).join(' ').trim()
+            ];
+          }
+        }
+      }
+    }
+  }
+  
+  return columns;
+}
+
+// Format date to YYYY-MM-DD
+function formatDate(dateStr) {
+  // Handle various date formats
+  const patterns = [
+    /(\d{2})[\.\/-](\d{2})[\.\/-](\d{4})/, // DD/MM/YYYY or DD.MM.YYYY or DD-MM-YYYY
+    /(\d{2})[\.\/-](\d{2})[\.\/-](\d{2})/, // DD/MM/YY or DD.MM.YY or DD-MM-YY
+    /(\d{4})[\.\/-](\d{2})[\.\/-](\d{2})/, // YYYY/MM/DD or YYYY.MM.DD or YYYY-MM-DD
+    /(\d{2})[\.\/-](\d{2})[\.\/-](\d{4})/, // MM/DD/YYYY or MM.DD.YYYY or MM-DD-YYYY (US format)
+  ];
+  
+  for (const pattern of patterns) {
+    const match = dateStr.match(pattern);
+    if (match) {
+      // Format differs based on the pattern
+      if (pattern.toString().includes('(\\d{4})[\\.\\/-](\\d{2})[\\.\\/-](\\d{2})')) {
+        // Already in YYYY-MM-DD format
+        return `${match[1]}-${match[2]}-${match[3]}`;
+      } else if (match[3].length === 4) {
+        // DD/MM/YYYY format
+        return `${match[3]}-${match[2]}-${match[1]}`;
+      } else if (match[3].length === 2) {
+        // DD/MM/YY format - assume 20XX for years
+        return `20${match[3]}-${match[2]}-${match[1]}`;
+      }
+    }
+  }
+  
+  // If we couldn't parse the date format, return as is
+  return dateStr;
+}
+
+// Determine room type based on room name
+function determineRoomType(room) {
+  if (!room) return 'SALLE_COURS';
+  
+  const roomLower = room.toLowerCase();
+  if (roomLower.includes('tp')) {
+    return 'SALLE_TP';
+  } else if (roomLower.includes('td')) {
+    return 'SALLE_TD';
+  } else if (roomLower.includes('amphi') || roomLower.includes('amphitheatre')) {
+    return 'AMPHITHEATRE';
+  } else {
+    return 'SALLE_COURS';
+  }
 }
 
 // GET /api/surveillance
@@ -108,22 +335,6 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/surveillance/files
-router.get('/files', async (req, res) => {
-  try {
-    // For testing, use a hardcoded userId
-    const userId = 1; // Replace with your test user ID
-    const files = await prisma.surveillanceFile.findMany({
-      where: { userId },
-      orderBy: { uploadedAt: 'desc' }
-    });
-    res.json({ files });
-  } catch (error) {
-    console.error('Error fetching files:', error);
-    res.status(500).json({ error: 'Failed to fetch files' });
-  }
-});
-
 // POST /api/surveillance/upload
 router.post('/upload', authenticate, upload.single('file'), async (req, res) => {
   try {
@@ -135,8 +346,19 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     }
 
     const filePath = req.file.path;
-    const text = await extractText(filePath);
-    const assignments = parseScheduleText(text);
+    
+    // Extract content from the document
+    const content = await extractDocumentContent(filePath);
+    
+    // Parse assignments from the content
+    const assignments = parseExamSchedule(content);
+    
+    if (assignments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not parse any assignments from the uploaded file'
+      });
+    }
 
     // Save file metadata
     const fileRecord = await prisma.surveillanceFile.create({
@@ -150,7 +372,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
 
     res.json({
       success: true,
-      message: 'File processed successfully',
+      message: `File processed successfully, extracted ${assignments.length} assignments`,
       assignments,
       fileId: fileRecord.id
     });
@@ -158,7 +380,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     console.error('File upload error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to process file'
+      message: `Failed to process file: ${error.message}`
     });
   }
 });
@@ -166,52 +388,100 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
 // POST /api/surveillance/confirm-upload
 router.post('/confirm-upload', authenticate, async (req, res) => {
   try {
-    const { assignments } = req.body;
+    const { assignments, fileId } = req.body;
     
-    if (!Array.isArray(assignments)) {
+    console.log('Received request:', { assignments, fileId });
+    
+    if (!Array.isArray(assignments) || assignments.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid assignments data'
+        message: 'Invalid or empty assignments data'
       });
     }
 
+    // First, ensure we have a default speciality
+    const defaultSpeciality = await prisma.speciality.upsert({
+      where: { name: 'Default' },
+      update: {},
+      create: {
+        name: 'Default',
+        description: 'Default speciality for surveillance assignments',
+        palier: 'LMD'
+      }
+    });
+
+    // Create assignments in database
     const createdAssignments = await Promise.all(
       assignments.map(async (assignment) => {
+        console.log('Processing assignment:', assignment);
+        
+        if (!assignment.module || !assignment.date || !assignment.time || !assignment.room) {
+          console.error('Missing required fields:', assignment);
+          throw new Error(`Missing required fields in assignment data: ${JSON.stringify(assignment)}`);
+        }
+
         // Find or create module
         const module = await prisma.module.upsert({
-          where: { code: assignment.module },
+          where: { 
+            code_academicYear: {
+              code: assignment.module,
+              academicYear: new Date().getFullYear() // Use current year as default
+            }
+          },
           update: {},
           create: {
             code: assignment.module,
             name: assignment.module,
-            specialityId: 1 // Default speciality, adjust as needed
+            academicYear: new Date().getFullYear(), // Use current year as default
+            specialityId: defaultSpeciality.id, // Use the default speciality
+            palier: 'LMD', // Default palier
+            semestre: 'SEMESTRE1' // Default semestre
           }
         });
 
-        return prisma.surveillanceAssignment.create({
-          data: {
-            date: new Date(assignment.date),
-            time: assignment.time,
-            module: assignment.module,
-            room: assignment.room,
-            roomType: assignment.roomType,
-            userId: req.user.id,
-            moduleId: module.id
+        // Create a proper date object
+        let assignmentDate;
+        try {
+          assignmentDate = new Date(assignment.date);
+          if (isNaN(assignmentDate.getTime())) {
+            throw new Error(`Invalid date format: ${assignment.date}`);
           }
-        });
+        } catch (err) {
+          console.error(`Error parsing date ${assignment.date}:`, err);
+          throw new Error(`Invalid date format: ${assignment.date}`);
+        }
+
+        try {
+          return await prisma.surveillanceAssignment.create({
+            data: {
+              date: assignmentDate,
+              time: assignment.time,
+              module: assignment.module,
+              room: assignment.room,
+              roomType: assignment.roomType || 'SALLE_COURS',
+              userId: req.user.id,
+              moduleId: module.id,
+              isResponsible: false,
+              canSwap: true
+            }
+          });
+        } catch (err) {
+          console.error('Error creating assignment:', err);
+          throw new Error(`Failed to create assignment: ${err.message}`);
+        }
       })
     );
 
     res.json({
       success: true,
-      message: 'Assignments created successfully',
+      message: `Created ${createdAssignments.length} assignments successfully`,
       assignments: createdAssignments
     });
   } catch (error) {
     console.error('Assignment creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create assignments'
+      message: `Failed to create assignments: ${error.message}`
     });
   }
 });

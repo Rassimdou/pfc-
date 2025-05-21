@@ -17,6 +17,7 @@ import {
   XCircle,
   Clock,
   Mail,
+  Loader2,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select"
 import {
@@ -35,6 +36,7 @@ export default function TeachersManagement() {
   const navigate = useNavigate();
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [invitingTeacher, setInvitingTeacher] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -57,7 +59,14 @@ export default function TeachersManagement() {
     try {
       setLoading(true);
       const response = await api.get('/admin/teachers');
-      setTeachers(response.data.data || []);
+      // Filter out pending teachers that are already active
+      const teachers = response.data.data || [];
+      const filteredTeachers = teachers.filter(teacher => {
+        if (teacher.type === 'active') return true;
+        // Only include pending teachers if there's no active teacher with the same email
+        return !teachers.some(t => t.type === 'active' && t.email === teacher.email);
+      });
+      setTeachers(filteredTeachers);
     } catch (error) {
       console.error('Error fetching teachers:', error);
       if (error.response?.status === 401) {
@@ -76,6 +85,7 @@ export default function TeachersManagement() {
 
   const handleAddTeacher = async () => {
     try {
+      setInvitingTeacher(true);
       // Validate email
       if (!newTeacher.email) {
         toast.error('Please enter an email address');
@@ -90,7 +100,7 @@ export default function TeachersManagement() {
           email: ''
         });
         setIsDialogOpen(false);
-        fetchTeachers();
+        fetchTeachers(); // Refresh the list to show the new pending teacher
       }
     } catch (error) {
       console.error('Error adding teacher:', error);
@@ -102,6 +112,8 @@ export default function TeachersManagement() {
       } else {
         toast.error(error.response?.data?.message || 'Failed to send invitation');
       }
+    } finally {
+      setInvitingTeacher(false);
     }
   };
 
@@ -115,22 +127,33 @@ export default function TeachersManagement() {
   const handleDeleteTeacher = async (id, type) => {
     if (window.confirm('Are you sure you want to delete this teacher?')) {
       try {
-        let url = `/admin/teachers/${id}`;
-        if (type === 'pending') {
-          url = `/admin/pending-teachers/${id}`;
+        console.log('Attempting to delete teacher:', { id, type });
+        const response = await api.delete(`/admin/teachers/${id}?type=${type}`);
+        if (response.data.success) {
+          toast.success('Teacher deleted successfully');
+          fetchTeachers();
+        } else {
+          toast.error(response.data.message || 'Failed to delete teacher');
         }
-        await api.delete(url);
-        toast.success('Teacher deleted successfully');
-        fetchTeachers();
       } catch (error) {
-        console.error('Error deleting teacher:', error);
+        console.error('Error deleting teacher:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status
+        });
+        
         if (error.response?.status === 401) {
           toast.error('Session expired. Please log in again.');
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           navigate('/login');
+        } else if (error.response?.status === 404) {
+          toast.error('Teacher not found');
         } else {
-          toast.error('Failed to delete teacher');
+          const errorMessage = error.response?.data?.message || 'Failed to delete teacher';
+          const errorDetails = error.response?.data?.error;
+          console.error('Detailed error:', errorDetails);
+          toast.error(`${errorMessage}${errorDetails ? `: ${errorDetails.message}` : ''}`);
         }
       }
     }
@@ -138,10 +161,10 @@ export default function TeachersManagement() {
 
   const handleResendInvitation = async (email) => {
     try {
-      const response = await api.post('/admin/teachers/resend-invitation', { email });
+      const response = await api.post('/api/admin/teachers/resend-invitation', { email });
 
       if (response.data.success) {
-        toast.success('Invitation resend successfully');
+        toast.success('Invitation resent successfully');
         fetchTeachers();
       }
     } catch (error) {
@@ -198,16 +221,25 @@ export default function TeachersManagement() {
                     placeholder="teacher@university.edu" 
                     value={newTeacher.email}
                     onChange={(e) => setNewTeacher({...newTeacher, email: e.target.value})}
+                    disabled={invitingTeacher}
                   />
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+                <Button variant="outline" onClick={handleCancel} disabled={invitingTeacher}>Cancel</Button>
                 <Button 
                   className="bg-emerald-600 hover:bg-emerald-700"
                   onClick={handleAddTeacher}
+                  disabled={invitingTeacher}
                 >
-                  Send Invitation
+                  {invitingTeacher ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending Invitation...
+                    </>
+                  ) : (
+                    'Send Invitation'
+                  )}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -273,6 +305,7 @@ export default function TeachersManagement() {
                   <tr className="bg-gray-50 border-b">
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Name</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Email</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-500">Phone</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
@@ -281,11 +314,16 @@ export default function TeachersManagement() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan="5" className="px-4 py-3 text-center">Loading...</td>
+                      <td colSpan="6" className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center">
+                          <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+                          <span className="ml-2">Loading teachers...</span>
+                        </div>
+                      </td>
                     </tr>
                   ) : filteredTeachers.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="px-4 py-3 text-center">No teachers found</td>
+                      <td colSpan="6" className="px-4 py-3 text-center">No teachers found</td>
                     </tr>
                   ) : (
                     filteredTeachers.map((teacher) => (
@@ -294,6 +332,9 @@ export default function TeachersManagement() {
                           {teacher.type === 'active' ? teacher.name : 'Pending Registration'}
                         </td>
                         <td className="px-4 py-3 text-emerald-600">{teacher.email}</td>
+                        <td className="px-4 py-3">
+                          {teacher.type === 'active' ? teacher.phoneNumber || 'N/A' : 'N/A'}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-1 rounded-full text-xs ${
                             teacher.status === 'Active' ? 'bg-green-100 text-green-800' :
@@ -312,6 +353,16 @@ export default function TeachersManagement() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">
+                            {teacher.type === 'pending' && (
+                              <Button 
+                                variant="ghost" 
+                                size="icon"
+                                onClick={() => handleResendInvitation(teacher.email)}
+                                title="Resend Invitation"
+                              >
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            )}
                             <Button 
                               variant="ghost" 
                               size="icon"

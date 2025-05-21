@@ -57,8 +57,10 @@ model Verification {
   id        Int      @id @default(autoincrement())
   token     String   @unique
   expires   DateTime
-  user      User     @relation(fields: [userId], references: [id])
-  userId    Int
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    Int?
+  pendingTeacher PendingTeacher? @relation(fields: [pendingTeacherId], references: [id])
+  pendingTeacherId Int?
 }
 
 model RefreshToken {
@@ -119,8 +121,6 @@ model ScheduleSlot {
   dayOfWeek       DayOfWeek             
   startTime       String                // Format: "HH:MM"
   endTime         String                // Format: "HH:MM"
-  room            String
-  equipment       String?
   isAvailable     Boolean               @default(true)
   
   // Relationships
@@ -130,6 +130,8 @@ model ScheduleSlot {
   moduleId        Int
   section         Section               @relation(fields: [sectionId], references: [id])
   sectionId       Int
+  room            Room?                 @relation(fields: [roomId], references: [id])
+  roomId          Int?
   
   // Permutation System
   requestsA       PermutationRequest[]  @relation("SlotA")
@@ -137,6 +139,7 @@ model ScheduleSlot {
 
   @@unique([moduleId, sectionId, dayOfWeek, startTime])
   @@index([ownerId, moduleId])
+  @@index([roomId])
 }
 
 enum DayOfWeek {
@@ -154,8 +157,8 @@ model SurveillanceAssignment {
   date          DateTime
   time          String                  // Format: "HH:MM"
   module        String
-  room          String
-  roomType      RoomType               // Added room type
+  room          String                  // Keep for backward compatibility
+  roomType      RoomType               // Keep for backward compatibility
   isResponsible Boolean                 @default(false)
   canSwap       Boolean                 @default(true)
   createdAt     DateTime                @default(now())
@@ -167,9 +170,12 @@ model SurveillanceAssignment {
   toSwapRequests SurveillanceSwapRequest[] @relation("ToAssignment")
   moduleRef     Module                  @relation(fields: [moduleId], references: [id])
   moduleId      Int
+  roomRef       Room?                   @relation(fields: [roomId], references: [id])
+  roomId        Int?
 
   @@index([date, userId])
   @@index([module, room])
+  @@index([roomId])
 }
 
 model SurveillanceSwapRequest {
@@ -272,14 +278,34 @@ model PendingTeacher {
   id        Int      @id @default(autoincrement())
   email     String   @unique
   createdAt DateTime @default(now())
-  
-  // Relationships
-  addedBy   User     @relation(fields: [adminId], references: [id])
+  admin     User     @relation(fields: [adminId], references: [id])
   adminId   Int
+  verification Verification[]
 }
 
 enum RoomType {
   SALLE_TP
   SALLE_TD
   SALLE_COURS
+}
+
+// --- Room Management ---
+model Room {
+  id            Int       @id @default(autoincrement())
+  number        String    @unique  // e.g., "A101", "B203", etc.
+  name          String    // e.g., "Amphitheatre 1", "Salle TP 3", etc.
+  type          RoomType
+  capacity      Int?
+  floor         Int?
+  building      String?   // e.g., "Building A", "Main Building", etc.
+  isAvailable   Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  surveillanceAssignments SurveillanceAssignment[]
+  scheduleSlots          ScheduleSlot[]
+
+  @@index([type, building])
+  @@index([number])
 }

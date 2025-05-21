@@ -5,7 +5,7 @@ import { Input } from "@/ui/input"
 import { Label } from "@/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select"
 import { BookOpen } from "lucide-react"
-import axios from "axios";
+import api from "@/utils/axios";
 import { toast } from "react-hot-toast";
 
 export default function Signup() {
@@ -26,34 +26,21 @@ export default function Signup() {
   const [googleData, setGoogleData] = useState(null);
 
   useEffect(() => {
-    // Check for Google OAuth callback
+    // Check for token in URL params
     const token = searchParams.get('token');
-    const googleError = searchParams.get('error');
-    
+    const email = searchParams.get('email');
     if (token) {
-      try {
-        // Store the token
-        localStorage.setItem('token', token);
-        
-        // Decode the token to get user data
-        const userData = JSON.parse(atob(token.split('.')[1]));
-        setGoogleData(userData);
-        setFormData(prev => ({
-          ...prev,
-          email: userData.email,
-          firstName: userData.firstName || '',
-          lastName: userData.lastName || ''
-        }));
+      setIsGoogleSignup(true);
+      setFormData(prev => ({
+        ...prev,
+        email: email || ''
+      }));
+      // Store token immediately
+      localStorage.setItem('token', token);
+      // If email is provided, mark it as verified
+      if (email) {
         setEmailVerified(true);
-        setIsGoogleSignup(true);
-      } catch (error) {
-        console.error('Error parsing token:', error);
-        setError('Invalid authentication data');
-        toast.error('Invalid authentication data');
       }
-    } else if (googleError) {
-      setError(decodeURIComponent(googleError));
-      toast.error(decodeURIComponent(googleError));
     }
   }, [searchParams]);
 
@@ -91,8 +78,8 @@ export default function Signup() {
   const verifyEmail = async () => {
     try {
       setLoading(true);
-      const response = await axios.post('/api/auth/check-email', {
-        email: formData.email
+      const response = await api.post('/auth/check-email', {
+        email: formData.email.toLowerCase().trim()
       });
       
       if (response.data.valid) {
@@ -103,6 +90,7 @@ export default function Signup() {
         toast.error('This email is not authorized to register. Please contact your administrator.');
       }
     } catch (err) {
+      console.error('Email verification error:', err);
       const errorMessage = err.response?.data?.message || 'Failed to verify email';
       setError(errorMessage);
       toast.error(errorMessage);
@@ -116,7 +104,7 @@ export default function Signup() {
     setError("");
     
     if (!validateForm()) return;
-    if (!emailVerified) {
+    if (!emailVerified && !isGoogleSignup) {
       setError("Please verify your email first");
       return;
     }
@@ -126,14 +114,24 @@ export default function Signup() {
       
       // If it's a Google signup, we don't need to set a password
       if (isGoogleSignup) {
-        const response = await axios.post(`${import.meta.env.VITE_API_URL}/auth/complete-google-signup`, {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('No authentication token found');
+        }
+
+        const response = await api.post('/auth/complete-google-signup', {
           email: formData.email,
           firstName: formData.firstName,
           lastName: formData.lastName,
           phoneNumber: formData.phoneNumber
+        }, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
         });
 
         if (response.data.success) {
+          // Update stored token and user data
           localStorage.setItem('token', response.data.accessToken);
           localStorage.setItem('user', JSON.stringify(response.data.user));
           toast.success('Account created successfully!');
@@ -141,7 +139,7 @@ export default function Signup() {
         }
       } else {
         // Regular email/password signup
-        const response = await axios.post(`${import.meta.env.VITE_API_URL}/auth/set-password`, {
+        const response = await api.post('/auth/set-password', {
           email: formData.email,
           password: formData.password,
           firstName: formData.firstName,
@@ -161,6 +159,11 @@ export default function Signup() {
       const errorMessage = err.response?.data?.message || "An error occurred during signup";
       setError(errorMessage);
       toast.error(errorMessage);
+      // If token is invalid, redirect to login
+      if (err.response?.status === 401) {
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
     } finally {
       setLoading(false);
     }

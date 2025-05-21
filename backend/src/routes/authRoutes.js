@@ -2,7 +2,7 @@ import express from 'express';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
 import '../config/passport.js'; // Make sure this path is correct
-import { setPassword, loginWithPassword, checkEmailAuthorization, handleGoogleAuth, completeGoogleSignup } from '../controllers/authController.js';
+import { setPassword, loginWithPassword, checkEmailAuthorization, handleGoogleAuth, completeGoogleSignup, generateTokens } from '../controllers/authController.js';
 import { authenticate } from '../middleware/authMiddleware.js';
 import prisma from '../lib/prismaClient.js';
 
@@ -40,7 +40,8 @@ router.get(
     passport.authenticate('google', { 
       scope: ['profile', 'email'],
       prompt: 'select_account',
-      accessType: 'offline'
+      accessType: 'offline',
+      failureRedirect: `${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Authentication failed')}`
     })(req, res, next);
   }
 );
@@ -64,21 +65,16 @@ router.get(
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(info?.message || 'Authentication failed')}`);
         }
 
-        if (user.token) {
-          console.log('Authentication successful, redirecting with token');
-          // Store the token in a secure HTTP-only cookie
-          res.cookie('accessToken', user.token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: 3600000 // 1 hour
-          });
-          
-          res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
-        } else {
-          console.error('No token in user object');
-          res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Authentication failed')}`);
+        // If user needs to complete registration (no phone number), redirect to signup
+        if (!user.phoneNumber) {
+          return res.redirect(`${process.env.FRONTEND_URL}/signup?token=${user.accessToken}&email=${encodeURIComponent(user.email)}`);
         }
+
+        // Otherwise redirect to dashboard with tokens
+        const redirectUrl = new URL(`${process.env.FRONTEND_URL}/user/page`);
+        redirectUrl.searchParams.set('token', user.accessToken);
+        redirectUrl.searchParams.set('user', JSON.stringify(user));
+        return res.redirect(redirectUrl.toString());
       } catch (error) {
         console.error('Error in Google callback:', error);
         res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('An unexpected error occurred')}`);

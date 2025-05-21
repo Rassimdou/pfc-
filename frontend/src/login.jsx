@@ -30,27 +30,49 @@ export default function Login() {
     setError("");
 
     try {
+      console.log('Starting login process...');
       const response = await api.post("/auth/login", { email, password });
+      console.log('Login response received:', response.data);
 
       if (response.data.success) {
         // Store user data and token in localStorage
-        localStorage.setItem("user", JSON.stringify(response.data.user));
-        localStorage.setItem("token", response.data.accessToken);
+        const userData = response.data.user;
+        const token = response.data.accessToken;
+        
+        console.log('User data from response:', userData);
+        console.log('User role from response:', userData.role);
+        console.log('Token:', token);
+        
+        // Store token and user data
+        localStorage.setItem("token", token);
+        localStorage.setItem("user", JSON.stringify(userData));
+        
+        // Configure axios default header
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         
         // Show success message
         toast.success("Login successful!");
         
         // Redirect based on role
-        if (response.data.user.role === "ADMIN") {
-          navigate("/admin");
-        } else {
-          navigate("/dashboard");
+        console.log('User role for redirection:', userData.role);
+        if (userData.role === "ADMIN") {
+          console.log('Redirecting to admin dashboard...');
+          navigate("/admin", { replace: true });
+        } else if (userData.role === "PROFESSOR") {
+          console.log('Redirecting to user dashboard...');
+          navigate("/user/page", { replace: true });
         }
+      } else {
+        console.error('Login failed:', response.data);
+        setError(response.data.message || 'Login failed');
+        toast.error(response.data.message || 'Login failed');
       }
     } catch (error) {
+      console.error('Login error:', error);
       let errorMessage = "Failed to log in. Please try again.";
       
       if (error.response) {
+        console.error('Error response:', error.response.data);
         switch (error.response.status) {
           case 401:
             errorMessage = "Invalid email or password";
@@ -61,8 +83,12 @@ export default function Login() {
           case 429:
             errorMessage = "Too many attempts. Please try again later.";
             break;
+          case 500:
+            errorMessage = error.response.data.message || "Server error. Please try again later.";
+            break;
         }
       } else if (error.request) {
+        console.error('No response received:', error.request);
         errorMessage = "Network error. Please check your connection.";
       }
 
@@ -75,7 +101,9 @@ export default function Login() {
 
   const handleGoogleLogin = () => {
     setLoading(true);
-    window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
+    const googleAuthUrl = `${import.meta.env.VITE_API_URL}/auth/google`;
+    console.log('Redirecting to Google auth:', googleAuthUrl);
+    window.location.href = googleAuthUrl;
   };
 
   return (

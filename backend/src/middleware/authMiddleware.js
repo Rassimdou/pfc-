@@ -3,21 +3,21 @@ import prisma from '../lib/prismaClient.js';
 
 export const authenticate = async (req, res, next) => {
     try {
-        // Check for token in Authorization header, cookie, or localStorage
+        // Get token from Authorization header
         const authHeader = req.headers.authorization;
-        const token = authHeader?.split(' ')[1] || req.cookies.accessToken || req.cookies.token;
+        const token = authHeader?.split(' ')[1];
         
         if (!token) {
             return res.status(401).json({ 
                 success: false,
-                message: 'Unauthorized - No token provided' 
+                message: 'No token provided' 
             });
         }
 
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             
-            // Verify user still exists
+            // Get user from database
             const user = await prisma.user.findUnique({
                 where: { id: decoded.id },
                 select: {
@@ -32,7 +32,7 @@ export const authenticate = async (req, res, next) => {
             if (!user) {
                 return res.status(401).json({ 
                     success: false,
-                    message: 'Unauthorized - User not found' 
+                    message: 'User not found' 
                 });
             }
 
@@ -42,17 +42,18 @@ export const authenticate = async (req, res, next) => {
             if (jwtError.name === 'TokenExpiredError') {
                 return res.status(401).json({
                     success: false,
-                    message: 'Token expired',
-                    code: 'TOKEN_EXPIRED'
+                    message: 'Token expired'
                 });
             }
-            throw jwtError;
+            return res.status(401).json({ 
+                success: false,
+                message: 'Invalid token' 
+            });
         }
     } catch (error) {
-        console.error('Auth middleware error:', error);
         return res.status(401).json({ 
             success: false,
-            message: 'Unauthorized - Invalid token' 
+            message: 'Authentication failed' 
         });
     }
 };

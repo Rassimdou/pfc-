@@ -97,7 +97,7 @@ export default function SurveillanceManagement() {
     try {
       await api.post('/surveillance/confirm-upload', {
         assignments: previewAssignments,
-        teacherId: selectedTeacher.id
+        fileId: previewAssignments[0]?.fileId
       });
       toast.success('Surveillance assignments created successfully');
       setShowPreview(false);
@@ -105,7 +105,7 @@ export default function SurveillanceManagement() {
       setSelectedTeacher(null);
     } catch (error) {
       console.error('Error confirming upload:', error);
-      toast.error('Failed to create surveillance assignments');
+      toast.error(error.response?.data?.message || 'Failed to create surveillance assignments');
     }
   };
 
@@ -210,7 +210,7 @@ export default function SurveillanceManagement() {
       </Card>
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-4xl bg-white">
           <DialogHeader>
             <DialogTitle>Preview Extracted Data</DialogTitle>
             <DialogDescription>
@@ -219,7 +219,7 @@ export default function SurveillanceManagement() {
           </DialogHeader>
           
           <div className="mt-4">
-            <div className="rounded-lg border overflow-hidden">
+            <div className="rounded-lg border overflow-hidden bg-white">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b">
@@ -229,7 +229,7 @@ export default function SurveillanceManagement() {
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="bg-white">
                   {previewAssignments.map((assignment, index) => (
                     <tr key={index} className="border-b hover:bg-gray-50">
                       <td className="px-4 py-3">

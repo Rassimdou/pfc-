@@ -46,7 +46,7 @@ export const checkEmailAuthorization = async (req, res) => {
   }
 };
 // Token generation utility
-const generateTokens = (user) => {
+export const generateTokens = (user) => {
   const accessToken = jwt.sign(
     {
       id: user.id,
@@ -92,9 +92,14 @@ export const handleGoogleAuth = async (profile) => {
           firstName: profile.name.givenName,
           lastName: profile.name.familyName,
           isVerified: true,
-          role: 'TEACHER',
+          role: 'PROFESSOR',
           department: pendingTeacher.department // Use department from pendingTeacher
         }
+      });
+
+      // Delete the pending teacher record since they are now active
+      await prisma.pendingTeacher.delete({
+        where: { email }
       });
     }
 
@@ -147,27 +152,29 @@ export const setPassword = async (req, res) => {
       });
     }
 
+    // Hash password if provided
     const hashedPassword = password ? await bcrypt.hash(password, SALT_ROUNDS) : null;
 
     // Create or update user with additional information
     const updatedUser = await prisma.user.upsert({
-      where: { email },
+      where: { email: email.toLowerCase() },
       update: { 
         password: hashedPassword,
         isVerified: true,
         firstName,
         lastName,
-        phoneNumber
+        phoneNumber,
+        name: `${firstName} ${lastName}`
       },
       create: {
-        email,
+        email: email.toLowerCase(),
         password: hashedPassword,
         isVerified: true,
         firstName,
         lastName,
         phoneNumber,
-        role: 'TEACHER',
-        name: `${firstName} ${lastName}`
+        name: `${firstName} ${lastName}`,
+        role: 'PROFESSOR'
       },
       select: {
         id: true,
@@ -179,42 +186,32 @@ export const setPassword = async (req, res) => {
       }
     });
 
-    const tokens = generateTokens(updatedUser);
-    
-    // Store refresh token in database
-    await prisma.refreshToken.create({
-      data: {
-        token: tokens.refreshToken,
-        userId: updatedUser.id
-      }
-    });
-
-    res.cookie('refreshToken', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        id: updatedUser.id, 
+        email: updatedUser.email, 
+        role: updatedUser.role,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
 
     res.json({
       success: true,
-      accessToken: tokens.accessToken,
+      accessToken: token,
       user: updatedUser
     });
 
   } catch (error) {
-    console.error('Password set error:', error);
-    
-    const response = {
+    console.error('Set password error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Failed to set password'
-    };
-
-    if (error.code === 'P2025') {
-      response.message = 'User not found';
-    }
-
-    res.status(500).json(response);
+      message: 'Failed to set password',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
@@ -257,18 +254,6 @@ export const loginWithPassword = async (req, res) => {
       });
     }
 
-    // Check if user is a pending teacher
-    const pendingTeacher = await prisma.pendingTeacher.findUnique({
-      where: { email: email.toLowerCase() }
-    });
-
-    if (pendingTeacher && !user.isVerified) {
-      return res.status(403).json({
-        success: false,
-        message: 'Please complete your registration first'
-      });
-    }
-
     const isValid = await bcrypt.compare(password, user.password);
     console.log('Password valid:', isValid);
 
@@ -279,6 +264,7 @@ export const loginWithPassword = async (req, res) => {
       });
     }
 
+    // Generate tokens
     const tokens = generateTokens(user);
     console.log('Tokens generated successfully');
     
@@ -291,16 +277,10 @@ export const loginWithPassword = async (req, res) => {
       }
     });
 
-    res.cookie('refreshToken', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
-
     // Remove password from user object before sending
     const { password: _, ...userWithoutPassword } = user;
 
+    // Send response with token in body
     res.json({
       success: true,
       accessToken: tokens.accessToken,

@@ -1,17 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Card } from '@/ui/card';
-import { FileText, ShieldCheck, User, Menu, X } from 'lucide-react';
+import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
+import { ShieldCheck, User, Menu, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 const navLinks = [
-  { to: '/dashboard', label: 'Dashboard', icon: ShieldCheck },
-  { to: '/surveillance', label: 'Surveillance', icon: ShieldCheck },
-  { to: '/files', label: 'My Files', icon: FileText },
-  { to: '/profile', label: 'Profile', icon: User },
+  { to: '/user/page', label: 'Dashboard', icon: ShieldCheck },
+  { to: '/user/surveillance', label: 'Surveillance', icon: ShieldCheck },
+  { to: '/user/profile', label: 'Profile', icon: User },
 ];
 
-export default function UserLayout({ children }) {
+export default function UserLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -20,8 +18,23 @@ export default function UserLayout({ children }) {
   // Check authentication
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token) {
+    const user = JSON.parse(localStorage.getItem('user'));
+    
+    if (!token || !user) {
       toast.error('Please log in to access this page');
+      navigate('/login');
+      return;
+    }
+
+    // If user is admin, redirect to admin dashboard
+    if (user.role === 'ADMIN') {
+      navigate('/admin');
+      return;
+    }
+
+    // If user is not a professor, redirect to login
+    if (user.role !== 'PROFESSOR') {
+      toast.error('Unauthorized access');
       navigate('/login');
       return;
     }
@@ -48,7 +61,7 @@ export default function UserLayout({ children }) {
   };
 
   return (
-    <div className="min-h-screen flex bg-gray-50 relative">
+    <div className="min-h-screen flex bg-gray-50">
       {/* Mobile Toggle Button */}
       <button
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -104,11 +117,11 @@ export default function UserLayout({ children }) {
       )}
 
       {/* Main content */}
-      <main className="flex-1 p-4 md:p-8 min-h-screen">
+      <main className="flex-1 min-h-screen">
         <div className="md:hidden h-16"></div> {/* Spacer for mobile header */}
-        <Card className="p-4 md:p-6">
-          {children}
-        </Card>
+        <div className="p-6">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

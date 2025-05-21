@@ -3,30 +3,68 @@ import { Button } from "@/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs"
 import { Calendar, Clock, Users, Bell, Settings, BookOpen, ArrowLeftRight, CheckCircle, XCircle } from "lucide-react"
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [user, setUser] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
+    // Check for token and user data in URL params (for Google auth)
+    const token = searchParams.get('token');
+    const userData = searchParams.get('user');
+    
+    if (token && userData) {
+      try {
+        const parsedUser = JSON.parse(userData);
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', userData);
+        setUser(parsedUser);
+        // Remove token and user from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+      }
+    } else {
+      // Check localStorage for existing session
+      const storedToken = localStorage.getItem('token');
+      const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+      
+      if (!storedToken || !storedUser) {
+        console.log('No token or user data found, redirecting to login');
+        navigate('/login');
+        return;
+      }
+      setUser(storedUser);
     }
 
-    fetchUserData();
-    fetchAssignments();
-  }, [navigate]);
+    // Validate token and fetch data
+    const validateAndFetchData = async () => {
+      try {
+        await fetchAssignments();
+      } catch (error) {
+        console.error('Error validating session:', error);
+        toast.error('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+      }
+    };
+
+    validateAndFetchData();
+  }, [navigate, searchParams]);
 
   const fetchUserData = async () => {
     try {
       const userData = JSON.parse(localStorage.getItem('user'));
+      if (!userData) {
+        throw new Error('No user data found');
+      }
       setUser(userData);
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -36,19 +74,24 @@ export default function Dashboard() {
 
   const fetchAssignments = async () => {
     try {
-      const response = await api.get('/api/surveillance');
-      setAssignments(response.data.data || []);
-      
-      // Check for new assignments (within the last 24 hours)
-      const newAssignments = response.data.data.filter(assignment => {
-        const assignmentDate = new Date(assignment.createdAt);
-        const now = new Date();
-        const hoursDiff = (now - assignmentDate) / (1000 * 60 * 60);
-        return hoursDiff <= 24;
-      });
+      const response = await api.get('/api/surveillance/assignments');
+      if (response.data.success) {
+        setAssignments(response.data.assignments || []);
+        
+        // Check for new assignments (within the last 24 hours)
+        const newAssignments = response.data.assignments.filter(assignment => {
+          const assignmentDate = new Date(assignment.createdAt);
+          const now = new Date();
+          const hoursDiff = (now - assignmentDate) / (1000 * 60 * 60);
+          return hoursDiff <= 24;
+        });
 
-      if (newAssignments.length > 0) {
-        toast.success(`You have ${newAssignments.length} new surveillance assignment(s)!`);
+        if (newAssignments.length > 0) {
+          toast.success(`You have ${newAssignments.length} new surveillance assignment(s)!`);
+        }
+      } else {
+        toast.error('Failed to load surveillance assignments');
+        setAssignments([]);
       }
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -58,7 +101,7 @@ export default function Dashboard() {
         localStorage.removeItem('user');
         navigate('/login');
       } else {
-        toast.error('Failed to load surveillance assignments');
+        toast.error(error.response?.data?.message || 'Failed to load surveillance assignments');
       }
       setAssignments([]);
     } finally {
@@ -163,7 +206,7 @@ export default function Dashboard() {
                 </div>
               </CardContent>
               <CardFooter>
-                <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/surveillance')}>
+                <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/user/surveillance')}>
                   View All Surveillances
                 </Button>
               </CardFooter>
@@ -227,10 +270,10 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-2">
-                  <Button className="w-full justify-start bg-emerald-600 hover:bg-emerald-700" onClick={() => navigate('/surveillance')}>
+                  <Button className="w-full justify-start bg-emerald-600 hover:bg-emerald-700" onClick={() => navigate('/user/surveillance')}>
                     <ArrowLeftRight className="h-4 w-4 mr-2" /> Request New Swap
                   </Button>
-                  <Button variant="outline" className="w-full justify-start" onClick={() => navigate('/surveillance')}>
+                  <Button variant="outline" className="w-full justify-start" onClick={() => navigate('/user/surveillance')}>
                     <Calendar className="h-4 w-4 mr-2" /> View Calendar
                   </Button>
                   <Button variant="outline" className="w-full justify-start">
@@ -247,4 +290,4 @@ export default function Dashboard() {
       </main>
     </div>
   );
-}
+};
