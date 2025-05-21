@@ -13,6 +13,13 @@ import path from 'path';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
+import { extractScheduleData } from '../utils/scheduleParser.js';
+import { importScheduleToDatabase } from '../utils/dbservice.js';
+import mammoth from 'mammoth';
+import xlsx from 'xlsx';
+import { isAuthenticated, isAdmin } from '../middleware/auth.js';
+import { upload, handleUploadError } from '../services/fileUploadService.js';
+import FileProcessingService from '../services/fileProcessingService.js';
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -24,13 +31,14 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // Multer configuration for file uploads
-const upload = multer({
+const uploadMulter = multer({
   dest: uploadDir,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/msword' || /\.doc$/.test(file.originalname)) {
+    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+        /\.docx$/.test(file.originalname)) {
       cb(null, true);
     } else {
-      cb(new Error('Only Microsoft Word 97-2003 (.doc) files are allowed'));
+      cb(new Error('Only Microsoft Word (.docx) files are allowed'));
     }
   },
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
@@ -45,7 +53,7 @@ router.delete('/teachers/:id', authenticate, deleteTeacher);
 router.delete('/pending-teachers/:id', authenticate, deletePendingTeacher);
 
 // Admin surveillance upload
-router.post('/surveillance/upload', authenticate, upload.single('file'), async (req, res) => {
+router.post('/surveillance/upload', authenticate, uploadMulter.single('file'), async (req, res) => {
   try {
     const { teacherId, date, time, module, room, isResponsible } = req.body;
     const file = req.file;
@@ -438,6 +446,288 @@ router.get('/modules', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch modules'
+    });
+  }
+});
+
+// Route to handle schedule file upload and processing
+router.post('/extract-schedule', 
+  isAuthenticated, 
+  isAdmin,
+  uploadMulter.single('file'),
+  handleUploadError,
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'No file uploaded' 
+        });
+      }
+
+      // Extract form data
+      const { semester, year, speciality, section } = req.body;
+
+      // Process the file based on its type
+      const fileType = FileProcessingService.getFileType(req.file.path);
+      let scheduleData;
+
+      if (fileType === 'docx') {
+        const result = await FileProcessingService.processDocxFile(req.file.path);
+        scheduleData = extractScheduleData(result.htmlContent);
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Only .docx files are supported for schedule uploads'
+        });
+      }
+
+      // Add form data to schedule data
+      scheduleData.headerInfo = {
+        ...scheduleData.headerInfo,
+        semester,
+        year,
+        speciality,
+        section
+      };
+
+      // Import schedule to database
+      const importResult = await importScheduleToDatabase(scheduleData, year, semester);
+
+      // Create user schedules based on section schedules
+      await createUserSchedules(scheduleData, year, semester);
+
+      // Clean up the uploaded file
+      await FileProcessingService.cleanupFile(req.file.path);
+
+      res.json({
+        success: true,
+        message: 'Schedule processed successfully',
+        data: scheduleData,
+        importResult
+      });
+
+    } catch (error) {
+      console.error('Error processing schedule:', error);
+      res.status(500).json({ 
+        success: false,
+        message: 'Error processing schedule',
+        error: error.message 
+      });
+    }
+});
+
+// Function to create user schedules based on section schedules
+async function createUserSchedules(scheduleData, year, semester) {
+  try {
+    const { scheduleEntries } = scheduleData;
+    const specialityCode = scheduleData.headerInfo.speciality;
+    const sectionLetter = scheduleData.headerInfo.section;
+
+    // Get all professors for this speciality
+    const professors = await prisma.user.findMany({
+      where: {
+        role: 'PROFESSOR',
+        specialitiesTaught: {
+          some: {
+            name: specialityCode
+          }
+        }
+      }
+    });
+
+    // Process each schedule entry
+    for (const entry of scheduleEntries) {
+      // Find the module
+      const module = await prisma.module.findFirst({
+        where: {
+          name: entry.modules[0],
+          academicYear: parseInt(year),
+          semestre: semester === '1' ? 'SEMESTRE1' : 'SEMESTRE2'
+        }
+      });
+
+      if (!module) continue;
+
+      // Find the section
+      const section = await prisma.section.findFirst({
+        where: {
+          name: `${sectionLetter}-G${entry.groups[0]}`,
+          moduleId: module.id,
+          academicYear: parseInt(year)
+        }
+      });
+
+      if (!section) continue;
+
+      // Find the professor
+      const professor = professors.find(p => 
+        entry.professors.some(profName => 
+          p.name.toLowerCase().includes(profName.toLowerCase())
+        )
+      );
+
+      if (!professor) continue;
+
+      // Create or update schedule slot
+      await prisma.scheduleSlot.upsert({
+        where: {
+          moduleId_sectionId_dayOfWeek_startTime: {
+            moduleId: module.id,
+            sectionId: section.id,
+            dayOfWeek: entry.day,
+            startTime: entry.timeSlot.split(' - ')[0]
+          }
+        },
+        update: {
+          ownerId: professor.id,
+          endTime: entry.timeSlot.split(' - ')[1],
+          isAvailable: false
+        },
+        create: {
+          dayOfWeek: entry.day,
+          startTime: entry.timeSlot.split(' - ')[0],
+          endTime: entry.timeSlot.split(' - ')[1],
+          isAvailable: false,
+          ownerId: professor.id,
+          moduleId: module.id,
+          sectionId: section.id
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error creating user schedules:', error);
+    throw error;
+  }
+}
+
+// Get all specialities
+router.get('/specialities', authenticate, async (req, res) => {
+  try {
+    const specialities = await prisma.speciality.findMany({
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        palier: true
+      },
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    res.json({
+      success: true,
+      specialities
+    });
+  } catch (error) {
+    console.error('Error fetching specialities:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch specialities'
+    });
+  }
+});
+
+// Route to import specialities from Excel
+router.post('/import-specialities', isAuthenticated, isAdmin, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    const workbook = xlsx.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(worksheet);
+
+    if (!data || data.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'The Excel file is empty or has no data'
+      });
+    }
+
+    // Validate required columns
+    const firstRow = data[0];
+    if (!firstRow['Palier'] || !firstRow['Specialités']) {
+      return res.status(400).json({
+        success: false,
+        message: 'The Excel file must contain "Palier" and "Specialités" columns'
+      });
+    }
+
+    const results = {
+      total: data.length,
+      imported: 0,
+      skipped: 0,
+      errors: []
+    };
+
+    // Process each row
+    for (const row of data) {
+      try {
+        const palier = row['Palier']?.toString().trim();
+        const speciality = row['Specialités']?.toString().trim();
+
+        if (!palier || !speciality) {
+          results.skipped++;
+          results.errors.push(`Row ${results.imported + results.skipped}: Missing required fields`);
+          continue;
+        }
+
+        // Validate palier
+        if (!['LMD', 'ING', 'SIGL'].includes(palier)) {
+          results.skipped++;
+          results.errors.push(`Row ${results.imported + results.skipped}: Invalid palier "${palier}"`);
+          continue;
+        }
+
+        // Create or update speciality
+        await prisma.speciality.upsert({
+          where: {
+            name_palier: {
+              name: speciality,
+              palier: palier
+            }
+          },
+          update: {
+            description: row['Description']?.toString().trim() || null
+          },
+          create: {
+            name: speciality,
+            palier: palier,
+            description: row['Description']?.toString().trim() || null
+          }
+        });
+
+        results.imported++;
+      } catch (error) {
+        results.skipped++;
+        results.errors.push(`Row ${results.imported + results.skipped}: ${error.message}`);
+      }
+    }
+
+    // Clean up the uploaded file
+    try {
+      await fs.promises.unlink(req.file.path);
+    } catch (error) {
+      console.error('Error deleting temporary file:', error);
+    }
+
+    res.json({
+      success: true,
+      message: `Import completed: ${results.imported} imported, ${results.skipped} skipped`,
+      results
+    });
+  } catch (error) {
+    console.error('Error processing specialities file:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error processing file: ' + error.message
     });
   }
 });

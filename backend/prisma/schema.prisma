@@ -72,21 +72,28 @@ model RefreshToken {
 }
 
 // --- Academic Structure ---
+model Palier {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  specialities Speciality[]
+  modules     Module[]
+  sections    Section[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([name])
+}
+
 model Speciality {
   id          Int       @id @default(autoincrement())
   name        String    @unique
   description String?
-  palier      PalierType
+  palier      Palier    @relation(fields: [palierId], references: [id])
+  palierId    Int
   modules     Module[]
   professors  User[]
   
-  @@index([name, palier])
-}
-
-enum PalierType {
-  LMD
-  ING
-  SIGL
+  @@index([name, palierId])
 }
 
 model Module {
@@ -95,7 +102,8 @@ model Module {
   name            String
   description     String?
   academicYear    Int            // Added academic year support
-  palier          PalierType
+  palier          Palier         @relation(fields: [palierId], references: [id])
+  palierId        Int
   semestre        Semestre
   speciality      Speciality     @relation(fields: [specialityId], references: [id])
   specialityId    Int
@@ -223,7 +231,8 @@ model Section {
   id              Int            @id @default(autoincrement())
   name            String
   academicYear    Int
-  palier          PalierType?
+  palier          Palier?        @relation(fields: [palierId], references: [id])
+  palierId        Int?
   module          Module         @relation(fields: [moduleId], references: [id])
   moduleId        Int
   slots           ScheduleSlot[]
