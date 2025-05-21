@@ -3,10 +3,12 @@ import { Button } from "@/ui/button"
 import { Input } from "@/ui/input"
 import { Label } from "@/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs"
-import { Upload, FileText, FileSpreadsheet, Calendar, Check, AlertCircle, Plus, Trash2, Edit2 } from "lucide-react"
+import { Upload, FileText, FileSpreadsheet, Calendar, Check, AlertCircle, Plus, Trash2, Edit2, Database } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/ui/dialog"
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
+import axios from 'axios';
+import { toast } from 'react-hot-toast';
 
 export default function Planning() {
   // State for classrooms
@@ -122,6 +124,54 @@ export default function Planning() {
   const [isDeleteModuleDialogOpen, setIsDeleteModuleDialogOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState(null);
 
+  // Add new state for file upload
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [extractedData, setExtractedData] = useState(null);
+  const [error, setError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // Add new state for specialities
+  const [specialities, setSpecialities] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [specialityFile, setSpecialityFile] = useState(null);
+  const [isUploadingSpecialities, setIsUploadingSpecialities] = useState(false);
+
+  // Add useEffect to fetch specialities
+  useEffect(() => {
+    const fetchSpecialities = async () => {
+      try {
+        const response = await axios.get('/api/admin/specialities', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          },
+          withCredentials: true
+        });
+        if (response.data.success) {
+          setSpecialities(response.data.specialities);
+        }
+      } catch (error) {
+        console.error('Error fetching specialities:', error);
+        toast.error('Failed to load specialities');
+      }
+    };
+
+    fetchSpecialities();
+  }, []);
+
+  // Add new state for form fields
+  const [formData, setFormData] = useState({
+    semester: '',
+    year: '',
+    speciality: '',
+    section: '',
+    fileType: 'docx'
+  });
+
+  // Add validation state
+  const [formErrors, setFormErrors] = useState({});
+
   // Handle form input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -235,6 +285,173 @@ export default function Planning() {
     setIsDeleteModuleDialogOpen(false);
   };
 
+  // Update file upload handler to only store the file
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setSelectedFile(file);
+      setError(null);
+      
+      // Validate file type
+      if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        setError('Please upload a .docx file');
+        setSelectedFile(null);
+        return;
+      }
+    }
+  };
+
+  // Add form field change handler
+  const handleFormChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    // Clear error for this field when it changes
+    if (formErrors[field]) {
+      setFormErrors(prev => ({
+        ...prev,
+        [field]: null
+      }));
+    }
+  };
+
+  // Add validation function
+  const validateForm = () => {
+    const errors = {};
+    if (!formData.semester) errors.semester = 'Semester is required';
+    if (!formData.year) errors.year = 'Year is required';
+    if (!formData.speciality) errors.speciality = 'Speciality is required';
+    if (!formData.section) errors.section = 'Section is required';
+    if (!selectedFile) errors.file = 'Please select a file';
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Update handleProcessFile to include auth headers
+  const handleProcessFile = async () => {
+    if (!validateForm()) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    const formDataToSend = new FormData();
+    formDataToSend.append('file', selectedFile);
+    formDataToSend.append('semester', formData.semester);
+    formDataToSend.append('year', formData.year);
+    formDataToSend.append('speciality', formData.speciality);
+    formDataToSend.append('section', formData.section);
+
+    try {
+      setIsProcessing(true);
+      const response = await axios.post('/api/admin/extract-schedule', formDataToSend, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data',
+        },
+        withCredentials: true
+      });
+      
+      if (response.data.success) {
+        setExtractedData(response.data.data.scheduleEntries);
+        toast.success('Schedule processed successfully');
+        const tabsList = document.querySelector('[role="tablist"]');
+        const previewTab = tabsList?.querySelector('[value="preview"]');
+        if (previewTab) {
+          previewTab.click();
+        }
+      } else {
+        setError(response.data.error || 'Error processing file');
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error processing file');
+      console.error('Error uploading file:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Add click handler for the Browse Files button
+  const handleBrowseClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Update handleFinalizeImport to include auth headers
+  const handleFinalizeImport = async () => {
+    if (!extractedData) return;
+
+    try {
+      setIsProcessing(true);
+      const response = await axios.post('/api/planning/import-schedule', {
+        scheduleData: extractedData
+      }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        withCredentials: true
+      });
+      
+      if (response.data.success) {
+        toast.success('Schedule imported successfully');
+      } else {
+        setError(response.data.error || 'Error importing schedule');
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error importing schedule');
+      console.error('Error importing schedule:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Add handler for speciality file upload
+  const handleSpecialityFileUpload = async () => {
+    if (!specialityFile) {
+      toast.error('Please select a file first');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', specialityFile);
+
+    try {
+      setIsUploadingSpecialities(true);
+      const response = await axios.post('/api/admin/import-specialities', formData, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data',
+        },
+        withCredentials: true
+      });
+
+      if (response.data.success) {
+        toast.success('Specialities imported successfully');
+        // Refresh specialities list
+        const specialitiesResponse = await axios.get('/api/admin/specialities', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          },
+          withCredentials: true
+        });
+        if (specialitiesResponse.data.success) {
+          setSpecialities(specialitiesResponse.data.specialities);
+        }
+      } else {
+        toast.error(response.data.message || 'Failed to import specialities');
+      }
+    } catch (error) {
+      console.error('Error uploading specialities:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to import specialities';
+      toast.error(errorMessage);
+    } finally {
+      setIsUploadingSpecialities(false);
+      setSpecialityFile(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -246,10 +463,11 @@ export default function Planning() {
       </div>
 
       <Tabs defaultValue="upload">
-        <TabsList className="grid w-full grid-cols-3 mb-6">
+        <TabsList className="grid w-full grid-cols-4 mb-6">
           <TabsTrigger value="upload">Upload Schedule</TabsTrigger>
           <TabsTrigger value="preview">Preview & Validate</TabsTrigger>
           <TabsTrigger value="history">Upload History</TabsTrigger>
+          <TabsTrigger value="specialities">Specialities</TabsTrigger>
         </TabsList>
 
         <TabsContent value="upload" className="space-y-6">
@@ -263,20 +481,28 @@ export default function Planning() {
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="semester">Semester</Label>
-                    <Select>
+                    <Select
+                      value={formData.semester}
+                      onValueChange={(value) => handleFormChange('semester', value)}
+                    >
                       <SelectTrigger id="semester" className="w-full">
                         <SelectValue placeholder="Select semester" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="fall-2023">Fall 2023</SelectItem>
-                        <SelectItem value="spring-2024">Spring 2024</SelectItem>
-                        <SelectItem value="summer-2024">Summer 2024</SelectItem>
+                        <SelectItem value="SEMESTRE1">Semester 1</SelectItem>
+                        <SelectItem value="SEMESTRE2">Semester 2</SelectItem>
                       </SelectContent>
                     </Select>
+                    {formErrors.semester && (
+                      <p className="text-sm text-red-500 mt-1">{formErrors.semester}</p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="year">Year</Label>
-                    <Select>
+                    <Select
+                      value={formData.year}
+                      onValueChange={(value) => handleFormChange('year', value)}
+                    >
                       <SelectTrigger id="year" className="w-full">
                         <SelectValue placeholder="Select year" />
                       </SelectTrigger>
@@ -288,25 +514,37 @@ export default function Planning() {
                         <SelectItem value="5">Fifth Year</SelectItem>
                       </SelectContent>
                     </Select>
+                    {formErrors.year && (
+                      <p className="text-sm text-red-500 mt-1">{formErrors.year}</p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="speciality">Specialité</Label>
-                    <Select>
+                    <Select
+                      value={formData.speciality}
+                      onValueChange={(value) => handleFormChange('speciality', value)}
+                    >
                       <SelectTrigger id="speciality" className="w-full">
                         <SelectValue placeholder="Select speciality" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="informatique">Informatique</SelectItem>
-                        <SelectItem value="mathematiques">Mathématiques</SelectItem>
-                        <SelectItem value="physique">Physique</SelectItem>
-                        <SelectItem value="chimie">Chimie</SelectItem>
-                        <SelectItem value="biologie">Biologie</SelectItem>
+                        {specialities.map((speciality) => (
+                          <SelectItem key={speciality.id} value={speciality.name}>
+                            {speciality.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    {formErrors.speciality && (
+                      <p className="text-sm text-red-500 mt-1">{formErrors.speciality}</p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="section">Section</Label>
-                    <Select>
+                    <Select
+                      value={formData.section}
+                      onValueChange={(value) => handleFormChange('section', value)}
+                    >
                       <SelectTrigger id="section" className="w-full">
                         <SelectValue placeholder="Select section" />
                       </SelectTrigger>
@@ -317,16 +555,18 @@ export default function Planning() {
                         <SelectItem value="D">Section D</SelectItem>
                       </SelectContent>
                     </Select>
+                    {formErrors.section && (
+                      <p className="text-sm text-red-500 mt-1">{formErrors.section}</p>
+                    )}
                   </div>
                   <div>
                     <Label htmlFor="file-type">File Type</Label>
-                    <Select defaultValue="pdf">
+                    <Select defaultValue="docx">
                       <SelectTrigger id="file-type" className="w-full">
                         <SelectValue placeholder="Select file type" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="pdf">PDF Schedule</SelectItem>
-                        <SelectItem value="excel">Excel Spreadsheet</SelectItem>
+                        <SelectItem value="docx">Word Document</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -340,13 +580,39 @@ export default function Planning() {
                   <p className="text-sm text-gray-500 mb-4">or click to browse your files</p>
                   <div className="flex gap-2 mb-4">
                     <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 flex items-center">
-                      <FileText className="h-3 w-3 mr-1" /> PDF
-                    </div>
-                    <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 flex items-center">
-                      <FileSpreadsheet className="h-3 w-3 mr-1" /> Excel
+                      <FileText className="h-3 w-3 mr-1" /> DOCX
                     </div>
                   </div>
-                  <Button className="bg-emerald-600 hover:bg-emerald-700">Browse Files</Button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".docx"
+                    className="hidden"
+                    disabled={!formData.semester || !formData.year || !formData.speciality || !formData.section}
+                  />
+                  <Button 
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={handleBrowseClick}
+                    disabled={!formData.semester || !formData.year || !formData.speciality || !formData.section}
+                  >
+                    {isProcessing ? 'Processing...' : 'Browse Files'}
+                  </Button>
+                  {selectedFile && (
+                    <div className="mt-4 p-3 bg-emerald-50 rounded-lg flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-emerald-600" />
+                      <span className="text-sm text-emerald-700">{selectedFile.name}</span>
+                    </div>
+                  )}
+                  {formErrors.file && (
+                    <p className="text-sm text-red-500 mt-2">{formErrors.file}</p>
+                  )}
+                  {error && (
+                    <div className="mt-4 p-3 bg-red-50 rounded-lg flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-red-600" />
+                      <span className="text-sm text-red-700">{error}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -355,16 +621,32 @@ export default function Planning() {
                 <div>
                   <h4 className="font-medium">File Processing Information</h4>
                   <p className="text-sm mt-1">
-                    Our system will automatically extract schedule information from your uploaded files. PDF files will
-                    be processed using OCR technology, while Excel files will be directly parsed. The processing may
+                    Our system will automatically extract schedule information from your uploaded Word documents. The processing may
                     take a few minutes depending on the file size and complexity.
                   </p>
                 </div>
               </div>
             </CardContent>
             <CardFooter className="flex justify-end gap-3">
-              <Button variant="outline">Cancel</Button>
-              <Button className="bg-emerald-600 hover:bg-emerald-700">Upload & Process</Button>
+              <Button variant="outline" onClick={() => {
+                setSelectedFile(null);
+                setFormData({
+                  semester: '',
+                  year: '',
+                  speciality: '',
+                  section: '',
+                  fileType: 'docx'
+                });
+                setFormErrors({});
+                setError(null);
+              }}>Cancel</Button>
+              <Button 
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleProcessFile}
+                disabled={isProcessing || !selectedFile}
+              >
+                {isProcessing ? 'Processing...' : 'Upload & Process'}
+              </Button>
             </CardFooter>
           </Card>
 
@@ -920,11 +1202,11 @@ export default function Planning() {
                                 <SelectValue placeholder="Select speciality" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Informatique">Informatique</SelectItem>
-                                <SelectItem value="Mathématiques">Mathématiques</SelectItem>
-                                <SelectItem value="Physique">Physique</SelectItem>
-                                <SelectItem value="Chimie">Chimie</SelectItem>
-                                <SelectItem value="Biologie">Biologie</SelectItem>
+                                {specialities.map((speciality) => (
+                                  <SelectItem key={speciality.id} value={speciality.name}>
+                                    {speciality.name}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1058,11 +1340,11 @@ export default function Planning() {
                                               <SelectValue placeholder="Select speciality" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                              <SelectItem value="Informatique">Informatique</SelectItem>
-                                              <SelectItem value="Mathématiques">Mathématiques</SelectItem>
-                                              <SelectItem value="Physique">Physique</SelectItem>
-                                              <SelectItem value="Chimie">Chimie</SelectItem>
-                                              <SelectItem value="Biologie">Biologie</SelectItem>
+                                              {specialities.map((speciality) => (
+                                                <SelectItem key={speciality.id} value={speciality.name}>
+                                                  {speciality.name}
+                                                </SelectItem>
+                                              ))}
                                             </SelectContent>
                                           </Select>
                                         </div>
@@ -1175,154 +1457,84 @@ export default function Planning() {
               <CardDescription>Review and validate the extracted schedule data before finalizing</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-6">
-                <div className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-emerald-600" />
-                    <div>
-                      <div className="font-medium">Fall2023_Schedule.pdf</div>
-                      <div className="text-xs text-gray-500">Uploaded 10 minutes ago • 2.4 MB</div>
+              {extractedData ? (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-5 w-5 text-emerald-600" />
+                      <div>
+                        <div className="font-medium">{selectedFile?.name}</div>
+                        <div className="text-xs text-gray-500">Processed successfully</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={handleBrowseClick}>
+                        Upload New File
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-sm text-emerald-600 font-medium flex items-center">
-                      <Check className="h-4 w-4 mr-1" /> Processing Complete
-                    </div>
-                    <Button variant="outline" size="sm">
-                      View Original
-                    </Button>
-                  </div>
-                </div>
 
-                <div className="rounded-lg border overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
-                    <div className="font-medium">Extracted Schedule Data</div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm">
-                        <AlertCircle className="h-4 w-4 mr-1" /> Report Issues
-                      </Button>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700">
-                        <Check className="h-4 w-4 mr-1" /> Validate All
-                      </Button>
+                  <div className="rounded-lg border overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
+                      <div className="font-medium">Extracted Schedule Data</div>
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            toast.error('Report submitted');
+                          }}
+                        >
+                          <AlertCircle className="h-4 w-4 mr-1" /> Report Issues
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                          onClick={handleFinalizeImport}
+                          disabled={isProcessing}
+                        >
+                          {isProcessing ? 'Importing...' : 'Finalize & Import'}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Professor</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Day</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Group</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {extractedData.map((entry, index) => (
+                            <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
+                              <td className="px-4 py-3">{entry.modules[0]}</td>
+                              <td className="px-4 py-3">{entry.professors[0]}</td>
+                              <td className="px-4 py-3">{entry.day}</td>
+                              <td className="px-4 py-3">{entry.timeSlot}</td>
+                              <td className="px-4 py-3">{entry.type}</td>
+                              <td className="px-4 py-3">{entry.groups[0]}</td>
+                              <td className="px-4 py-3">
+                                {entry.rooms[0] ? `${entry.rooms[0].type} ${entry.rooms[0].number}` : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Course</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Professor</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Year</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Specialité</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Section</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Day</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[
-                          {
-                            course: "CS 101: Intro to Programming",
-                            professor: "Dr. Michael Chen",
-                            year: "First Year",
-                            speciality: "Informatique",
-                            section: "A",
-                            day: "Monday",
-                            time: "10:00 - 12:00",
-                            room: "A-201",
-                            status: "Valid",
-                          },
-                          {
-                            course: "CS 202: Data Structures",
-                            professor: "Dr. Sarah Johnson",
-                            year: "Second Year",
-                            speciality: "Informatique",
-                            section: "B",
-                            day: "Wednesday",
-                            time: "14:00 - 16:00",
-                            room: "B-105",
-                            status: "Valid",
-                          },
-                          {
-                            course: "CS 303: Algorithms",
-                            professor: "Dr. James Wilson",
-                            year: "Third Year",
-                            speciality: "Informatique",
-                            section: "C",
-                            day: "Thursday",
-                            time: "09:00 - 11:00",
-                            room: "C-302",
-                            status: "Warning",
-                          },
-                          {
-                            course: "MATH 201: Calculus I",
-                            professor: "Dr. Emily Rodriguez",
-                            year: "First Year",
-                            speciality: "Mathématiques",
-                            section: "A",
-                            day: "Tuesday",
-                            time: "13:00 - 15:00",
-                            room: "D-110",
-                            status: "Valid",
-                          },
-                          {
-                            course: "PHY 305: Advanced Physics",
-                            professor: "Prof. David Kim",
-                            year: "Fourth Year",
-                            speciality: "Physique",
-                            section: "D",
-                            day: "Friday",
-                            time: "11:00 - 13:00",
-                            room: "A-105",
-                            status: "Error",
-                          },
-                        ].map((item, index) => (
-                          <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
-                            <td className="px-4 py-3">{item.course}</td>
-                            <td className="px-4 py-3">{item.professor}</td>
-                            <td className="px-4 py-3">{item.year}</td>
-                            <td className="px-4 py-3">{item.speciality}</td>
-                            <td className="px-4 py-3">{item.section}</td>
-                            <td className="px-4 py-3">{item.day}</td>
-                            <td className="px-4 py-3">{item.time}</td>
-                            <td className="px-4 py-3">{item.room}</td>
-                            <td className="px-4 py-3">
-                              <span
-                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                  item.status === "Valid"
-                                    ? "bg-green-100 text-green-800"
-                                    : item.status === "Error"
-                                      ? "bg-red-100 text-red-800"
-                                      : "bg-yellow-100 text-yellow-800"
-                                }`}
-                              >
-                                {item.status}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                              >
-                                Edit
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Upload a schedule file to preview extracted data</p>
+                </div>
+              )}
             </CardContent>
-            <CardFooter className="flex justify-end gap-3">
-              <Button variant="outline">Discard</Button>
-              <Button className="bg-emerald-600 hover:bg-emerald-700">Finalize & Import</Button>
-            </CardFooter>
           </Card>
         </TabsContent>
 
@@ -1348,7 +1560,7 @@ export default function Planning() {
                   <tbody>
                     {[
                       {
-                        fileName: "Fall2023_Schedule.pdf",
+                        fileName: "Fall2023_Schedule.docx",
                         uploadedBy: "Admin User",
                         date: "Oct 15, 2023",
                         semester: "Fall 2023",
@@ -1362,14 +1574,14 @@ export default function Planning() {
                         status: "Processed",
                       },
                       {
-                        fileName: "Math_Department_Fall2023.pdf",
+                        fileName: "Math_Department_Fall2023.docx",
                         uploadedBy: "Department Head",
                         date: "Sep 28, 2023",
                         semester: "Fall 2023",
                         status: "Processed",
                       },
                       {
-                        fileName: "Engineering_Spring2024.pdf",
+                        fileName: "Engineering_Spring2024.docx",
                         uploadedBy: "Admin User",
                         date: "Sep 20, 2023",
                         semester: "Spring 2024",
@@ -1385,8 +1597,8 @@ export default function Planning() {
                     ].map((item, index) => (
                       <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
                         <td className="px-4 py-3 flex items-center gap-2">
-                          {item.fileName.endsWith(".pdf") ? (
-                            <FileText className="h-4 w-4 text-red-500" />
+                          {item.fileName.endsWith(".docx") ? (
+                            <FileText className="h-4 w-4 text-blue-500" />
                           ) : (
                             <FileSpreadsheet className="h-4 w-4 text-green-500" />
                           )}
@@ -1426,6 +1638,75 @@ export default function Planning() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="specialities" className="space-y-6">
+          <Card className="hover:shadow-md transition-all duration-200">
+            <CardHeader>
+              <CardTitle className="text-lg">Manage Specialities</CardTitle>
+              <CardDescription>Upload Excel file containing paliers and specialities</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center">
+                  <div className="mb-4 rounded-full bg-emerald-50 p-3">
+                    <Database className="h-6 w-6 text-emerald-600" />
+                  </div>
+                  <h3 className="text-lg font-medium mb-2">Upload Specialities Excel File</h3>
+                  <p className="text-sm text-gray-500 mb-4">Upload an Excel file containing paliers and specialities</p>
+                  <div className="flex gap-2 mb-4">
+                    <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 flex items-center">
+                      <FileSpreadsheet className="h-3 w-3 mr-1" /> XLSX
+                    </div>
+                  </div>
+                  <input
+                    type="file"
+                    accept=".xlsx"
+                    onChange={(e) => setSpecialityFile(e.target.files[0])}
+                    className="hidden"
+                    id="speciality-file"
+                  />
+                  <Button 
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => document.getElementById('speciality-file').click()}
+                    disabled={isUploadingSpecialities}
+                  >
+                    {isUploadingSpecialities ? 'Uploading...' : 'Browse Files'}
+                  </Button>
+                  {specialityFile && (
+                    <div className="mt-4 p-3 bg-emerald-50 rounded-lg flex items-center gap-2">
+                      <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                      <span className="text-sm text-emerald-700">{specialityFile.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border p-4 bg-blue-50 text-blue-800 flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h4 className="font-medium">File Requirements</h4>
+                    <p className="text-sm mt-1">
+                      The Excel file should contain the following columns:
+                    </p>
+                    <ul className="list-disc list-inside mt-2 text-sm">
+                      <li>Palier (LMD, ING, SIGL)</li>
+                      <li>Specialités (Speciality names)</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button 
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={handleSpecialityFileUpload}
+                    disabled={!specialityFile || isUploadingSpecialities}
+                  >
+                    {isUploadingSpecialities ? 'Uploading...' : 'Upload & Process'}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
