@@ -27,7 +27,7 @@ export default function Surveillance() {
 
   const fetchAssignments = async () => {
     try {
-      const response = await api.get('/api/surveillance/assignments');
+      const response = await api.get('/surveillance/assignments');
       if (response.data.success) {
         setAssignments(response.data.assignments || []);
         // Filter assignments that are pending swaps
@@ -62,7 +62,7 @@ export default function Surveillance() {
     }
 
     try {
-      await api.post(`/api/surveillance/${selectedAssignment.id}/swap-request`, {
+      await api.post(`/surveillance/${selectedAssignment.id}/swap-request`, {
         targetAssignmentId: targetAssignment
       });
       toast.success('Swap request sent successfully');
@@ -76,7 +76,7 @@ export default function Surveillance() {
 
   const handleAcceptSwap = async (swapId) => {
     try {
-      await api.post(`/api/surveillance/swap/${swapId}/accept`);
+      await api.post(`/surveillance/swap/${swapId}/accept`);
       toast.success('Swap request accepted');
       fetchAssignments();
     } catch (error) {
@@ -87,7 +87,7 @@ export default function Surveillance() {
 
   const handleDeclineSwap = async (swapId) => {
     try {
-      await api.post(`/api/surveillance/swap/${swapId}/decline`);
+      await api.post(`/surveillance/swap/${swapId}/decline`);
       toast.success('Swap request declined');
       fetchAssignments();
     } catch (error) {
@@ -98,7 +98,7 @@ export default function Surveillance() {
 
   const handleCancelSwap = async (swapId) => {
     try {
-      await api.post(`/api/surveillance/swap/${swapId}/cancel`);
+      await api.post(`/surveillance/swap/${swapId}/cancel`);
       toast.success('Swap request cancelled');
       fetchAssignments();
     } catch (error) {

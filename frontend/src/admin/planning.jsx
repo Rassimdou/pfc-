@@ -723,8 +723,27 @@ export default function Planning() {
           console.log('Updated schedules response:', updatedResponse.data);
           
           if (updatedResponse.data.success) {
-            setSectionSchedules(updatedResponse.data.schedules);
+            // Update the sectionSchedules state with the new data
+            setSectionSchedules(updatedResponse.data.schedules || []);
             console.log('Schedules updated in state:', updatedResponse.data.schedules);
+            
+            // Clear the extracted data and form
+            setExtractedData(null);
+            setSelectedFile(null);
+            setFormData({
+              semester: '',
+              year: '',
+              speciality: '',
+              section: '',
+              fileType: 'docx'
+            });
+            
+            // Switch to the section schedules tab
+            const tabsList = document.querySelector('[role="tablist"]');
+            const sectionSchedulesTab = tabsList?.querySelector('[value="section-schedules"]');
+            if (sectionSchedulesTab) {
+              sectionSchedulesTab.click();
+            }
           } else {
             console.error('Failed to fetch updated schedules:', updatedResponse.data.message);
             toast.error('Schedule saved but failed to refresh view');
@@ -755,7 +774,7 @@ export default function Planning() {
 
     try {
       setIsUploadingSpecialities(true);
-      const response = await api.post('/api/admin/import-specialities', formData, {
+      const response = await api.post('/admin/import-specialities', formData, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'Content-Type': 'multipart/form-data'
@@ -765,7 +784,7 @@ export default function Planning() {
       if (response.data.success) {
         toast.success('Specialities imported successfully');
         // Refresh specialities list
-        const specialitiesResponse = await api.get('/api/admin/specialities', {
+        const specialitiesResponse = await api.get('/admin/specialities', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`,
             'Content-Type': 'application/json'

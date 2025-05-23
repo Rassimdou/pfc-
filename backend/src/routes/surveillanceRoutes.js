@@ -388,25 +388,72 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
 // POST /api/surveillance/confirm-upload
 router.post('/confirm-upload', authenticate, async (req, res) => {
   try {
-    const { assignments, fileId } = req.body;
+    const { assignments, fileId, teacherId } = req.body;
     
-    console.log('Received request:', { assignments, fileId });
+    console.log('Received request:', { assignments, fileId, teacherId });
     
-    if (!Array.isArray(assignments) || assignments.length === 0) {
+    if (!Array.isArray(assignments) || assignments.length === 0 || !teacherId) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or empty assignments data'
+        message: 'Invalid or empty assignments data or missing teacher ID'
       });
     }
 
+    // Verify the teacher exists and get their details
+    const teacher = await prisma.user.findFirst({
+      where: { 
+        OR: [
+          { id: parseInt(teacherId) },
+          { email: teacherId.toString().includes('@') ? teacherId : `${teacherId}@usthb.dz` }
+        ]
+      }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    // Use the found teacher's ID consistently
+    const consistentTeacherId = teacher.id;
+
     // First, ensure we have a default speciality
+    const defaultPalier = await prisma.palier.upsert({
+      where: { name: 'LMD' },
+      update: {},
+      create: { name: 'LMD' }
+    });
+
+    const defaultYear = await prisma.year.upsert({
+      where: {
+        name_palierId: {
+          name: 'Default',
+          palierId: defaultPalier.id
+        }
+      },
+      update: {},
+      create: {
+        name: 'Default',
+        palierId: defaultPalier.id
+      }
+    });
+
     const defaultSpeciality = await prisma.speciality.upsert({
-      where: { name: 'Default' },
+      where: {
+        name_palierId_yearId: {
+          name: 'Default',
+          palierId: defaultPalier.id,
+          yearId: defaultYear.id
+        }
+      },
       update: {},
       create: {
         name: 'Default',
         description: 'Default speciality for surveillance assignments',
-        palier: 'LMD'
+        palierId: defaultPalier.id,
+        yearId: defaultYear.id
       }
     });
 
@@ -433,8 +480,9 @@ router.post('/confirm-upload', authenticate, async (req, res) => {
             code: assignment.module,
             name: assignment.module,
             academicYear: new Date().getFullYear(), // Use current year as default
-            specialityId: defaultSpeciality.id, // Use the default speciality
-            palier: 'LMD', // Default palier
+            specialityId: defaultSpeciality.id,
+            palierId: defaultPalier.id,
+            yearId: defaultYear.id,
             semestre: 'SEMESTRE1' // Default semestre
           }
         });
@@ -459,7 +507,7 @@ router.post('/confirm-upload', authenticate, async (req, res) => {
               module: assignment.module,
               room: assignment.room,
               roomType: assignment.roomType || 'SALLE_COURS',
-              userId: req.user.id,
+              userId: consistentTeacherId, // Use the consistent teacher ID
               moduleId: module.id,
               isResponsible: false,
               canSwap: true
@@ -471,6 +519,38 @@ router.post('/confirm-upload', authenticate, async (req, res) => {
         }
       })
     );
+
+    // Send email notification to the teacher
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM,
+      to: teacher.email,
+      subject: 'New Surveillance Assignments',
+      html: `
+        <h2>New Surveillance Assignments</h2>
+        <p>You have been assigned ${createdAssignments.length} new surveillance duties:</p>
+        <ul>
+          ${createdAssignments.map(assignment => `
+            <li>
+              <strong>Date:</strong> ${new Date(assignment.date).toLocaleDateString()}<br>
+              <strong>Time:</strong> ${assignment.time}<br>
+              <strong>Module:</strong> ${assignment.module}<br>
+              <strong>Room:</strong> ${assignment.room}
+            </li>
+          `).join('')}
+        </ul>
+        <p>Please log in to your account to view more details.</p>
+      `
+    });
 
     res.json({
       success: true,

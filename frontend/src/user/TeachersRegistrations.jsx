@@ -1,6 +1,7 @@
 // components/TeacherRegistration.jsx
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
+import api from '../../services/api';
 
 const TeacherRegistration = () => {
   const { token } = useParams();
@@ -18,16 +19,12 @@ const TeacherRegistration = () => {
     
     try {
       // API call to verify token and create account
-      const response = await fetch('/api/auth/complete-registration', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, token })
-      });
+      const response = await api.post('/auth/complete-registration', { ...formData, token });
 
-      if (!response.ok) throw new Error('Registration failed');
-      
-      // Redirect to dashboard
-      window.location = '/dashboard';
+      if (response.data.success) {
+        // Redirect to dashboard
+        window.location = '/dashboard';
+      }
     } catch (err) {
       setError(err.message);
     } finally {

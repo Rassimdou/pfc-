@@ -775,11 +775,48 @@ class ScheduleParser {
         continue;
       }
 
-      // Check for standalone professor name
-      if (line.length > 1 && !line.match(/^G\d+:/) && !line.match(/^\/.+--/) && !line.toLowerCase().includes('course')) {
-        if (!entry.professors.includes(line)) {
-          entry.professors.push(line.trim());
+      // Check for standalone professor name or room number followed by professor name
+      if (line.length > 1 && !line.match(/^G\d+:/) && !line.match(/^\/.+--/)) {
+        // Try to match room number followed by professor name
+        const roomProfMatch = line.match(/^(\d+)\s+(.+)$/);
+        if (roomProfMatch) {
+          const [_, roomNum, profName] = roomProfMatch;
+          if (entry.type === 'COURSE') {
+            entry.rooms.push({
+              number: roomNum,
+              type: 'SALLE_COURS'
+            });
+          }
+          if (!entry.professors.includes(profName)) {
+            entry.professors.push(profName.trim());
+          }
+        } else if (!line.toLowerCase().includes('course')) {
+          // If no room number found, treat as standalone professor name
+          if (!entry.professors.includes(line)) {
+            entry.professors.push(line.trim());
+          }
         }
+      }
+
+      // Check for course entry with professor name
+      const courseMatch = line.match(/^(.+?)\s+course\s+(.+)$/i);
+      if (courseMatch) {
+        const [_, moduleName, professorName] = courseMatch;
+        entry.modules.push(moduleName.trim());
+        entry.type = 'COURSE';
+        if (!entry.professors.includes(professorName)) {
+          entry.professors.push(professorName.trim());
+        }
+        continue;
+      }
+
+      // Check for course entry without professor name
+      const courseOnlyMatch = line.match(/^(.+?)\s+course$/i);
+      if (courseOnlyMatch) {
+        const [_, moduleName] = courseOnlyMatch;
+        entry.modules.push(moduleName.trim());
+        entry.type = 'COURSE';
+        continue;
       }
     }
 

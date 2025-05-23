@@ -161,7 +161,8 @@ export default function TeachersManagement() {
 
   const handleResendInvitation = async (email) => {
     try {
-      const response = await api.post('/api/admin/teachers/resend-invitation', { email });
+      setResendingInvitation(true);
+      const response = await api.post('/admin/teachers/resend-invitation', { email });
 
       if (response.data.success) {
         toast.success('Invitation resent successfully');
@@ -170,6 +171,8 @@ export default function TeachersManagement() {
     } catch (error) {
       console.error('Error resending invitation:', error);
       toast.error(error.response?.data?.message || 'Failed to resend invitation');
+    } finally {
+      setResendingInvitation(false);
     }
   };
 

@@ -74,7 +74,7 @@ export default function Dashboard() {
 
   const fetchAssignments = async () => {
     try {
-      const response = await api.get('/api/surveillance/assignments');
+      const response = await api.get('/surveillance/assignments');
       if (response.data.success) {
         setAssignments(response.data.assignments || []);
         

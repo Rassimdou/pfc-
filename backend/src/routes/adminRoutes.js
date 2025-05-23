@@ -121,11 +121,11 @@ router.post('/surveillance/upload', authenticate, uploadMulter.single('file'), a
       data: {
         userId: parseInt(teacherId),
         date: new Date(date),
-        time: time,
-        module: module,
-        room: room,
-        isResponsible: isResponsible === 'true',
-        canSwap: !isResponsible,
+        time,
+        module,
+        room,
+        isResponsible: isResponsible === true || isResponsible === 'true',
+        canSwap: !(isResponsible === true || isResponsible === 'true'),
         moduleId: moduleRecord.id
       }
     });
@@ -166,7 +166,7 @@ router.post('/surveillance/upload', authenticate, uploadMulter.single('file'), a
             <p><strong>Time:</strong> ${time}</p>
             <p><strong>Module:</strong> ${module}</p>
             <p><strong>Room:</strong> ${room}</p>
-            <p><strong>Role:</strong> ${isResponsible === 'true' ? 'Responsible' : 'Assistant'}</p>
+            <p><strong>Role:</strong> ${isResponsible === true || isResponsible === 'true' ? 'Responsible' : 'Assistant'}</p>
           </div>
           <p>Please log in to your dashboard to view more details.</p>
           <hr style="border: 1px solid #eee; margin: 20px 0;">
@@ -240,6 +240,61 @@ router.get('/surveillance', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch surveillance assignments'
+    });
+  }
+});
+
+// Get surveillance assignments for a specific teacher
+router.get('/surveillance/teacher/:teacherId', authenticate, async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    // Verify the teacher exists
+    const teacher = await prisma.user.findUnique({
+      where: { id: parseInt(teacherId) }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    const assignments = await prisma.surveillanceAssignment.findMany({
+      where: {
+        userId: parseInt(teacherId)
+      },
+      include: {
+        moduleRef: true,
+        fromSwapRequests: {
+          include: {
+            toAssignment: true
+          }
+        },
+        toSwapRequests: {
+          include: {
+            fromAssignment: true
+          }
+        }
+      },
+      orderBy: {
+        date: 'asc'
+      }
+    });
+
+    res.json({
+      success: true,
+      assignments: assignments.map(assignment => ({
+        ...assignment,
+        swapRequest: assignment.fromSwapRequests[0] || assignment.toSwapRequests[0]
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching teacher surveillance assignments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch teacher surveillance assignments'
     });
   }
 });
@@ -326,6 +381,10 @@ router.post('/surveillance', authenticate, async (req, res) => {
           <li><strong>Role:</strong> ${isResponsible ? 'Responsible' : 'Assistant'}</li>
         </ul>
         <p>Please log in to your account to view more details.</p>
+        ${isResponsible ? 
+          '<p><strong>Note:</strong> As the responsible teacher, this assignment cannot be swapped.</p>' : 
+          '<p><strong>Note:</strong> As an assistant, you can request to swap this assignment with other teachers.</p>'
+        }
       `
     });
 
@@ -680,23 +739,54 @@ router.post('/import-specialities', isAuthenticated, isAdmin, upload.single('fil
           continue;
         }
 
-        // Create or update speciality
-        await prisma.speciality.upsert({
+        // First find or create the palier
+        const palierRecord = await prisma.palier.upsert({
           where: {
-            name_palier: {
-              name: speciality,
-              palier: palier
-            }
+            name: 'LMD' // Default palier name
           },
-          update: {
-            description: row['Description']?.toString().trim() || null
-          },
+          update: {},
           create: {
-            name: speciality,
-            palier: palier,
-            description: row['Description']?.toString().trim() || null
+            name: 'LMD'
           }
         });
+
+        console.log('Found or created palier:', palierRecord);
+
+        // Then find or create the year using the palier ID
+        const year = await prisma.year.upsert({
+          where: {
+            name_palierId: {
+              name: String(palier),
+              palierId: palierRecord.id
+            }
+          },
+          update: {},
+          create: {
+            name: String(palier),
+            palierId: palierRecord.id
+          }
+        });
+
+        console.log('Found or created year:', year);
+
+        // Then find or create speciality using the year ID
+        const specialityRecord = await prisma.speciality.upsert({
+          where: {
+            name_palierId_yearId: {
+              name: speciality,
+              palierId: palierRecord.id,
+              yearId: year.id
+            }
+          },
+          update: {},
+          create: {
+            name: speciality,
+            palierId: palierRecord.id,
+            yearId: year.id
+          }
+        });
+
+        console.log('Found or created speciality:', specialityRecord);
 
         results.imported++;
       } catch (error) {
@@ -943,30 +1033,54 @@ router.post('/schedules/section', authenticate, async (req, res) => {
       });
     }
 
-    // Find or create related entities (speciality, year, module, section, professor, room)
-    const speciality = await prisma.speciality.upsert({
-      where: { name: specialityName },
+    // First find or create the palier
+    const palierRecord = await prisma.palier.upsert({
+      where: {
+        name: 'LMD' // Default palier name
+      },
       update: {},
-      create: { name: specialityName, palierId: 1, yearId: 1 } // Default palier/year, adjust as needed
+      create: {
+        name: 'LMD'
+      }
     });
 
-    // Find or create year - ensure academicYear is treated as a string
+    console.log('Found or created palier:', palierRecord);
+
+    // Then find or create the year using the palier ID
     const year = await prisma.year.upsert({
       where: {
         name_palierId: {
           name: String(academicYear),
-          palierId: speciality.palierId
+          palierId: palierRecord.id
         }
       },
       update: {},
       create: {
         name: String(academicYear),
-        description: `Year ${academicYear}`,
-        palierId: speciality.palierId
+        palierId: palierRecord.id
       }
     });
 
-    console.log('Found/created year:', year);
+    console.log('Found or created year:', year);
+
+    // Then find or create speciality using the year ID
+    const speciality = await prisma.speciality.upsert({
+      where: {
+        name_palierId_yearId: {
+          name: specialityName,
+          palierId: palierRecord.id,
+          yearId: year.id
+        }
+      },
+      update: {},
+      create: {
+        name: specialityName,
+        palierId: palierRecord.id,
+        yearId: year.id
+      }
+    });
+
+    console.log('Found or created speciality:', speciality);
 
      const module = await prisma.module.upsert({
         where: { code: moduleName, academicYear: parseInt(academicYear) }, // Assuming moduleName is code or unique identifier
@@ -1100,24 +1214,24 @@ router.delete('/schedules/section/:id', authenticate, async (req, res) => {
 // Bulk import schedule slots for a section
 router.post('/schedules/section/bulk', async (req, res) => {
   try {
-    const { specialityName, academicYear, semester, sectionName, scheduleEntries } = req.body;
-
     console.log('Received bulk import request:', {
-      specialityName,
-      academicYear,
-      semester,
-      sectionName,
-      scheduleEntriesCount: scheduleEntries?.length
+      specialityName: req.body.specialityName,
+      academicYear: req.body.academicYear,
+      semester: req.body.semester,
+      sectionName: req.body.sectionName,
+      scheduleEntriesCount: req.body.scheduleEntries?.length
     });
+
+    const { specialityName, academicYear, semester, sectionName, scheduleEntries } = req.body;
 
     // Validate required fields
     if (!specialityName || !academicYear || !semester || !sectionName || !scheduleEntries) {
       console.log('Missing required fields:', {
-        hasSpeciality: !!specialityName,
-        hasYear: !!academicYear,
-        hasSemester: !!semester,
-        hasSection: !!sectionName,
-        hasEntries: !!scheduleEntries
+        specialityName: !!specialityName,
+        academicYear: !!academicYear,
+        semester: !!semester,
+        sectionName: !!sectionName,
+        scheduleEntries: !!scheduleEntries
       });
       return res.status(400).json({
         success: false,
@@ -1125,45 +1239,59 @@ router.post('/schedules/section/bulk', async (req, res) => {
       });
     }
 
-    // Find or create speciality
-    const speciality = await prisma.speciality.findFirst({
+    // First find or create the palier
+    const palierRecord = await prisma.palier.upsert({
       where: {
-        name: specialityName
+        name: 'LMD' // Default palier name
+      },
+      update: {},
+      create: {
+        name: 'LMD'
       }
     });
 
-    if (!speciality) {
-      console.log('Speciality not found:', specialityName);
-      return res.status(404).json({
-        success: false,
-        message: 'Speciality not found'
-      });
-    }
+    console.log('Found or created palier:', palierRecord);
 
-    // Find or create year - ensure academicYear is treated as a string
+    // Then find or create the year using the palier ID
     const year = await prisma.year.upsert({
       where: {
         name_palierId: {
           name: String(academicYear),
-          palierId: speciality.palierId
+          palierId: palierRecord.id
         }
       },
       update: {},
       create: {
         name: String(academicYear),
-        description: `Year ${academicYear}`,
-        palierId: speciality.palierId
+        palierId: palierRecord.id
       }
     });
 
-    console.log('Found/created year:', year);
+    console.log('Found or created year:', year);
+
+    // Then find or create speciality using the year ID
+    const speciality = await prisma.speciality.upsert({
+      where: {
+        name_palierId_yearId: {
+          name: specialityName,
+          palierId: palierRecord.id,
+          yearId: year.id
+        }
+      },
+      update: {},
+      create: {
+        name: specialityName,
+        palierId: palierRecord.id,
+        yearId: year.id
+      }
+    });
+
+    console.log('Found or created speciality:', speciality);
 
     // Process each schedule entry
-    const results = {
-      total: scheduleEntries.length,
-      created: 0,
-      errors: []
-    };
+    let totalEntries = 0;
+    let successfulEntries = 0;
+    let errors = [];
 
     for (const entry of scheduleEntries) {
       try {
@@ -1172,30 +1300,37 @@ router.post('/schedules/section/bulk', async (req, res) => {
         // Find or create module
         const module = await prisma.module.upsert({
           where: {
-            code: entry.module
+            name: entry.module
           },
           update: {},
           create: {
-            code: entry.module,
             name: entry.module,
+            code: entry.module,
             specialityId: speciality.id,
             yearId: year.id,
-            semester: semester
+            semester: semester.toUpperCase()
           }
         });
+
+        console.log('Found/created module:', module);
 
         // Find or create section
         const section = await prisma.section.upsert({
           where: {
-            name: `${sectionName}-G${entry.groups[0]}`
+            name_specialityId: {
+              name: sectionName,
+              specialityId: speciality.id
+            }
           },
           update: {},
           create: {
-            name: `${sectionName}-G${entry.groups[0]}`,
+            name: sectionName,
             specialityId: speciality.id,
             yearId: year.id
           }
         });
+
+        console.log('Found/created section:', section);
 
         // Find or create professor
         const professor = await prisma.professor.upsert({
@@ -1205,9 +1340,11 @@ router.post('/schedules/section/bulk', async (req, res) => {
           update: {},
           create: {
             name: entry.professor,
-            email: `${entry.professor.toLowerCase().replace(/\s+/g, '.')}@univ.dz`
+            email: `${entry.professor.toLowerCase().replace(/\s+/g, '.')}@univ.com`
           }
         });
+
+        console.log('Found/created professor:', professor);
 
         // Find or create room
         const room = await prisma.room.upsert({
@@ -1222,8 +1359,10 @@ router.post('/schedules/section/bulk', async (req, res) => {
           }
         });
 
+        console.log('Found/created room:', room);
+
         // Create schedule slot
-        await prisma.scheduleSlot.create({
+        const scheduleSlot = await prisma.scheduleSlot.create({
           data: {
             day: entry.day,
             timeSlot: entry.timeSlot,
@@ -1232,33 +1371,44 @@ router.post('/schedules/section/bulk', async (req, res) => {
             professorId: professor.id,
             roomId: room.id,
             sectionId: section.id,
-            semester: semester
+            groups: entry.groups || []
           }
         });
 
-        results.created++;
-        console.log('Successfully created schedule entry');
+        console.log('Created schedule slot:', scheduleSlot);
+        successfulEntries++;
       } catch (error) {
         console.error('Error processing entry:', error);
-        results.errors.push({
+        errors.push({
           entry,
           error: error.message
         });
       }
+      totalEntries++;
     }
 
-    console.log('Bulk import results:', results);
+    console.log('Import completed:', {
+      totalEntries,
+      successfulEntries,
+      errorCount: errors.length
+    });
 
     return res.json({
       success: true,
-      message: `Successfully imported ${results.created} out of ${results.total} entries`,
-      results
+      message: 'Schedule imported successfully',
+      stats: {
+        totalEntries,
+        successfulEntries,
+        errorCount: errors.length
+      },
+      errors: errors.length > 0 ? errors : undefined
     });
+
   } catch (error) {
     console.error('Error in bulk import:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to import schedules',
+      message: 'Error importing schedule',
       error: error.message
     });
   }
