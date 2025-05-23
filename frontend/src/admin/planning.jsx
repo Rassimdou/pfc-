@@ -54,6 +54,8 @@ export default function Planning() {
   // State for specialities
   const [specialities, setSpecialities] = useState([]);
   const [filteredSpecialities, setFilteredSpecialities] = useState([]);
+  // State for sections
+  const [sections, setSections] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [specialityFile, setSpecialityFile] = useState(null);
   const [isUploadingSpecialities, setIsUploadingSpecialities] = useState(false);
@@ -154,6 +156,54 @@ export default function Planning() {
   // State for validation
   const [formErrors, setFormErrors] = useState({});
 
+  // Add new state for section schedules
+  const [sectionSchedules, setSectionSchedules] = useState([]);
+  const [selectedSection, setSelectedSection] = useState(''); // Use empty string initially
+  const [isAddSectionScheduleDialogOpen, setIsAddSectionScheduleDialogOpen] = useState(false);
+  const [isEditSectionScheduleDialogOpen, setIsEditSectionScheduleDialogOpen] = useState(false);
+  const [isDeleteSectionScheduleDialogOpen, setIsDeleteSectionScheduleDialogOpen] = useState(false);
+  const [newSectionSchedule, setNewSectionSchedule] = useState({
+    day: 'MONDAY',
+    timeSlot: '',
+    module: '',
+    professor: '',
+    room: '',
+    type: 'COURSE',
+    groups: []
+  });
+
+  // Add dummy data for section schedules
+  const dummySectionSchedules = [
+    {
+      id: 1,
+      section: 'A',
+      speciality: 'Informatique',
+      year: 1,
+      semester: 'SEMESTRE1',
+      day: 'MONDAY',
+      timeSlot: '08:00 - 10:00',
+      module: 'CS101',
+      professor: 'Dr. Smith',
+      room: 'A101',
+      type: 'COURSE',
+      groups: ['G1']
+    },
+    {
+      id: 2,
+      section: 'B',
+      speciality: 'Informatique',
+      year: 1,
+      semester: 'SEMESTRE1',
+      day: 'WEDNESDAY',
+      timeSlot: '10:00 - 12:00',
+      module: 'MATH101',
+      professor: 'Dr. Johnson',
+      room: 'B203',
+      type: 'TD',
+      groups: ['G2']
+    }
+  ];
+
   // Fetch specialities on component mount
   useEffect(() => {
     const fetchSpecialities = async () => {
@@ -240,6 +290,89 @@ export default function Planning() {
       setFilteredSpecialities(specialities);
     }
   }, [formData.year, specialities]);
+
+  // Fetch sections based on selected speciality and year
+  useEffect(() => {
+    const fetchSections = async () => {
+      if (!formData.speciality || !formData.year) {
+        // Reset sections if speciality or year is not selected
+        // setSections([]); // Assuming a sections state variable exists or will be added
+        // setSelectedSection('');
+        return;
+      }
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.error('No authentication token found');
+          return;
+        }
+        // TODO: Implement backend endpoint to fetch sections by speciality and year
+        // For now, using dummy sections
+        console.log(`Fetching sections for speciality: ${formData.speciality}, year: ${formData.year}`);
+        // Example: const response = await api.get(`/admin/sections?speciality=${formData.speciality}&year=${formData.year}`, {
+        //   headers: {
+        //     'Authorization': `Bearer ${token}`
+        //   }
+        // });
+        // if (response.data.success) {
+        //   setSections(response.data.sections);
+        // } else {
+        //   console.error('Failed to fetch sections:', response.data.message);
+        // }
+      } catch (error) {
+        console.error('Error fetching sections:', error);
+      }
+    };
+    fetchSections();
+  }, [formData.speciality, formData.year]);
+
+  // Fetch section schedules based on selected section, speciality, year, and semester
+  useEffect(() => {
+    const fetchSectionSchedules = async () => {
+      if (!formData.section || !formData.speciality || !formData.year || !formData.semester) {
+        toast.error('Please select all required fields');
+        return;
+      }
+
+      try {
+        // Convert year to number and ensure it's a valid value
+        const yearNumber = parseInt(formData.year);
+        if (isNaN(yearNumber) || yearNumber < 1 || yearNumber > 5) {
+          toast.error('Invalid year selected');
+          return;
+        }
+
+        // Log request parameters
+        console.log('Fetching schedules with params:', {
+          section: formData.section,
+          speciality: formData.speciality,
+          year: yearNumber,
+          semester: formData.semester
+        });
+
+        const response = await api.get('/admin/schedules/section', {
+          params: {
+            section: formData.section,
+            speciality: formData.speciality.replace(/\+/g, ' '),
+            year: yearNumber,
+            semester: formData.semester
+          }
+        });
+
+        if (response.data.success) {
+          setSectionSchedules(response.data.schedules);
+          console.log('Received schedule data:', response.data.schedules);
+        } else {
+          toast.error(response.data.message || 'Failed to fetch schedules');
+        }
+      } catch (error) {
+        console.error('Error fetching schedules:', error);
+        const errorMessage = error.response?.data?.message || 'Failed to fetch schedules';
+        toast.error(errorMessage);
+      }
+    };
+    fetchSectionSchedules();
+  }, [formData.section, formData.speciality, formData.year, formData.semester]);
 
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -463,8 +596,17 @@ export default function Planning() {
         }
       });
       
+      console.log('File processing response:', response.data);
+      
       if (response.data.success) {
-        setExtractedData(response.data.data);
+        // Check if the response has the expected structure
+        if (!response.data.data || !response.data.data.scheduleEntries) {
+          console.error('Invalid response structure:', response.data);
+          toast.error('Invalid data format received from server');
+          return;
+        }
+
+        setExtractedData(response.data);
         toast.success('Schedule processed successfully');
         const tabsList = document.querySelector('[role="tablist"]');
         const previewTab = tabsList?.querySelector('[value="preview"]');
@@ -491,31 +633,113 @@ export default function Planning() {
     fileInputRef.current?.click();
   };
 
-  // Update handleFinalizeImport to include auth headers
+  // Update handleFinalizeImport to handle the data structure correctly
   const handleFinalizeImport = async () => {
-    if (!extractedData) return;
-
     try {
-      setIsProcessing(true);
-      const response = await api.post('/api/planning/import-schedule', {
-        scheduleData: extractedData
-      }, {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to access this feature');
+        return;
+      }
+
+      console.log('Starting import process...');
+      console.log('Extracted data:', extractedData);
+      console.log('Form data:', formData);
+
+      if (!extractedData?.data?.scheduleEntries || !Array.isArray(extractedData.data.scheduleEntries)) {
+        console.error('Invalid extracted data structure:', extractedData);
+        toast.error('No valid schedule data to import');
+        return;
+      }
+
+      const scheduleEntries = extractedData.data.scheduleEntries;
+      if (scheduleEntries.length === 0) {
+        console.error('No schedule entries found');
+        toast.error('No schedule entries to import');
+        return;
+      }
+
+      // Log the first entry to verify structure
+      console.log('First schedule entry:', scheduleEntries[0]);
+
+      // Prepare the data for saving
+      const scheduleData = {
+        specialityName: formData.speciality,
+        academicYear: parseInt(formData.year),
+        semester: formData.semester,
+        sectionName: formData.section,
+        scheduleEntries: scheduleEntries.map(entry => {
+          console.log('Processing entry:', entry);
+          
+          if (!entry || !entry.modules || !entry.professors || !entry.rooms) {
+            console.error('Invalid entry format:', entry);
+            throw new Error('Invalid schedule entry format');
+          }
+
+          const processedEntry = {
+            day: entry.day,
+            timeSlot: entry.timeSlot,
+            module: entry.modules[0],
+            professor: entry.professors[0],
+            room: entry.rooms[0]?.number || '',
+            type: entry.type || 'COURSE',
+            groups: Array.isArray(entry.groups) ? entry.groups : [entry.groups]
+          };
+
+          console.log('Processed entry:', processedEntry);
+          return processedEntry;
+        })
+      };
+
+      console.log('Sending schedule data to server:', scheduleData);
+
+      const response = await api.post('/admin/schedules/section/bulk', scheduleData, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
       
+      console.log('Server response:', response.data);
+
       if (response.data.success) {
         toast.success('Schedule imported successfully');
+        
+        // Immediately fetch the updated schedules
+        try {
+          console.log('Fetching updated schedules...');
+          const updatedResponse = await api.get('/admin/schedules/section', {
+            params: {
+              section: formData.section,
+              speciality: formData.speciality,
+              year: formData.year,
+              semester: formData.semester
+            },
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          console.log('Updated schedules response:', updatedResponse.data);
+          
+          if (updatedResponse.data.success) {
+            setSectionSchedules(updatedResponse.data.schedules);
+            console.log('Schedules updated in state:', updatedResponse.data.schedules);
+          } else {
+            console.error('Failed to fetch updated schedules:', updatedResponse.data.message);
+            toast.error('Schedule saved but failed to refresh view');
+          }
+        } catch (fetchError) {
+          console.error('Error fetching updated schedules:', fetchError);
+          toast.error('Schedule saved but failed to refresh view');
+        }
       } else {
-        setError(response.data.error || 'Error importing schedule');
+        console.error('Server returned error:', response.data);
+        toast.error(response.data.message || 'Failed to import schedule');
       }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Error importing schedule');
-      console.error('Error importing schedule:', err);
-    } finally {
-      setIsProcessing(false);
+    } catch (error) {
+      console.error('Error importing schedule:', error);
+      toast.error(error.response?.data?.message || 'Failed to import schedule');
     }
   };
 
@@ -563,6 +787,261 @@ export default function Planning() {
     }
   };
 
+  // Add new handler functions
+  const handleAddSectionSchedule = async () => {
+    if (!selectedSection || !formData.speciality || !formData.year || !formData.semester) {
+      toast.error('Please select a section, speciality, year, and semester first');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to access this feature');
+        return;
+      }
+
+      const payload = {
+        section: selectedSection,
+        speciality: formData.speciality,
+        year: parseInt(formData.year),
+        semester: formData.semester,
+        day: newSectionSchedule.day,
+        timeSlot: newSectionSchedule.timeSlot,
+        module: newSectionSchedule.module,
+        professor: newSectionSchedule.professor,
+        room: newSectionSchedule.room,
+        type: newSectionSchedule.type,
+        groups: newSectionSchedule.groups,
+      };
+
+      const response = await api.post('/admin/schedules/section', payload, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data.success) {
+        toast.success('Schedule added successfully');
+        setIsAddSectionScheduleDialogOpen(false);
+        setNewSectionSchedule({
+          day: 'MONDAY',
+          timeSlot: '',
+          module: '',
+          professor: '',
+          room: '',
+          type: 'COURSE',
+          groups: []
+        });
+        // Refresh the schedules list
+        const updatedResponse = await api.get('/admin/schedules/section', {
+          params: {
+            section: selectedSection,
+            speciality: formData.speciality,
+            year: formData.year,
+            semester: formData.semester
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (updatedResponse.data.success) {
+          setSectionSchedules(updatedResponse.data.scheduleSlots);
+        }
+      } else {
+        toast.error(response.data.message || 'Failed to add schedule');
+      }
+    } catch (error) {
+      console.error('Error adding section schedule:', error);
+      toast.error(error.response?.data?.message || 'Failed to add schedule');
+    }
+  };
+
+  // Handler to open edit dialog and populate form
+  const handleEditSectionScheduleClick = (schedule) => {
+    // Map the schedule data back to the form state structure
+    setNewSectionSchedule({
+      id: schedule.id,
+      day: schedule.day,
+      timeSlot: schedule.timeSlot,
+      module: schedule.module, // This might need mapping if module is ID in state but name in table
+      professor: schedule.professor,
+      room: schedule.room, // This might need mapping if room is ID in state but number in table
+      type: schedule.type,
+      groups: schedule.groups,
+    });
+    setIsEditSectionScheduleDialogOpen(true);
+  };
+
+  // Handler to perform the edit
+  const handleEditSectionSchedule = async () => {
+    if (!newSectionSchedule.id) {
+      toast.error('No schedule selected for editing');
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to access this feature');
+        return;
+      }
+
+      const payload = {
+        day: newSectionSchedule.day,
+        timeSlot: newSectionSchedule.timeSlot,
+        module: newSectionSchedule.module,
+        professor: newSectionSchedule.professor,
+        room: newSectionSchedule.room,
+        type: newSectionSchedule.type,
+        groups: newSectionSchedule.groups,
+      };
+
+      const response = await api.put(`/admin/schedules/section/${newSectionSchedule.id}`, payload, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data.success) {
+        toast.success('Schedule updated successfully');
+        setIsEditSectionScheduleDialogOpen(false);
+        setNewSectionSchedule({
+          day: 'MONDAY',
+          timeSlot: '',
+          module: '',
+          professor: '',
+          room: '',
+          type: 'COURSE',
+          groups: []
+        });
+        // Refresh the schedules list
+        const updatedResponse = await api.get('/admin/schedules/section', {
+          params: {
+            section: selectedSection,
+            speciality: formData.speciality,
+            year: formData.year,
+            semester: formData.semester
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (updatedResponse.data.success) {
+          setSectionSchedules(updatedResponse.data.scheduleSlots);
+        }
+      } else {
+        toast.error(response.data.message || 'Failed to update schedule');
+      }
+    } catch (error) {
+      console.error('Error updating section schedule:', error);
+      toast.error(error.response?.data?.message || 'Failed to update schedule');
+    }
+  };
+
+  // Handler to open delete dialog and store selected schedule
+  const handleDeleteSectionScheduleClick = (schedule) => {
+    setSelectedSchedule(schedule); // Use selectedSchedule state for delete confirmation
+    setIsDeleteSectionScheduleDialogOpen(true);
+  };
+
+  // Handler to perform the delete
+  const handleDeleteSectionSchedule = async () => {
+    if (!selectedSchedule?.id) {
+      toast.error('No schedule selected for deletion');
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to access this feature');
+        return;
+      }
+
+      const response = await api.delete(`/admin/schedules/section/${selectedSchedule.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.data.success) {
+        toast.success('Schedule deleted successfully');
+        setIsDeleteSectionScheduleDialogOpen(false);
+        setSelectedSchedule(null);
+        // Refresh the schedules list
+        const updatedResponse = await api.get('/admin/schedules/section', {
+          params: {
+            section: selectedSection,
+            speciality: formData.speciality,
+            year: formData.year,
+            semester: formData.semester
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (updatedResponse.data.success) {
+          setSectionSchedules(updatedResponse.data.scheduleSlots);
+        }
+      } else {
+        toast.error(response.data.message || 'Failed to delete schedule');
+      }
+    } catch (error) {
+      console.error('Error deleting section schedule:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete schedule');
+    }
+  };
+
+  // Add this useEffect near the other useEffect hooks
+  useEffect(() => {
+    const fetchSchedules = async () => {
+      if (!formData.section || !formData.speciality || !formData.year || !formData.semester) {
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.error('No authentication token found');
+          return;
+        }
+
+        console.log('Fetching schedules with params:', {
+          section: formData.section,
+          speciality: formData.speciality,
+          year: formData.year,
+          semester: formData.semester
+        });
+
+        const response = await api.get('/admin/schedules/section', {
+          params: {
+            section: formData.section,
+            speciality: formData.speciality.replace(/\+/g, ' '),
+            year: parseInt(formData.year),
+            semester: formData.semester
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.data.success) {
+          console.log('Fetched schedules:', response.data.schedules);
+          setSectionSchedules(response.data.schedules);
+        } else {
+          console.error('Failed to fetch schedules:', response.data.message);
+          toast.error(response.data.message || 'Failed to fetch schedules');
+        }
+      } catch (error) {
+        console.error('Error fetching schedules:', error);
+        toast.error(error.response?.data?.message || 'Failed to fetch schedules');
+      }
+    };
+
+    fetchSchedules();
+  }, [formData.section, formData.speciality, formData.year, formData.semester]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -579,6 +1058,7 @@ export default function Planning() {
           <TabsTrigger value="preview">Preview & Validate</TabsTrigger>
           <TabsTrigger value="history">Upload History</TabsTrigger>
           <TabsTrigger value="specialities">Specialities</TabsTrigger>
+          <TabsTrigger value="section-schedules">Section Schedules</TabsTrigger>
         </TabsList>
 
         <TabsContent value="upload" className="space-y-6">
@@ -660,10 +1140,17 @@ export default function Planning() {
                         <SelectValue placeholder="Select section" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="A">Section A</SelectItem>
+                      <SelectItem value="A">Section A</SelectItem>
                         <SelectItem value="B">Section B</SelectItem>
                         <SelectItem value="C">Section C</SelectItem>
                         <SelectItem value="D">Section D</SelectItem>
+                        <SelectItem value="1">Section D</SelectItem>
+                        <SelectItem value="2">Section D</SelectItem>
+                        <SelectItem value="3">Section D</SelectItem>  
+                        <SelectItem value="4">Section D</SelectItem>
+                        <SelectItem value="5">Section D</SelectItem>
+                        <SelectItem value="6">Section D</SelectItem>
+                        <SelectItem value="7">Section D</SelectItem>
                       </SelectContent>
                     </Select>
                     {formErrors.section && (
@@ -779,6 +1266,7 @@ export default function Planning() {
                   <TabsTrigger value="classrooms">Classrooms</TabsTrigger>
                   <TabsTrigger value="schedules">Schedules</TabsTrigger>
                   <TabsTrigger value="modules">Modules</TabsTrigger>
+                  <TabsTrigger value="section-schedules">Section Schedules</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="classrooms" className="space-y-4">
@@ -1828,6 +2316,291 @@ export default function Planning() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="section-schedules" className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-medium">Section Schedule Management</h3>
+            <Button 
+              onClick={() => setIsAddSectionScheduleDialogOpen(true)}
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={!selectedSection || !formData.speciality || !formData.year || !formData.semester}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Schedule
+            </Button>
+          </div>
+
+          {/* Section Selection */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="year-select">Year</Label>
+              <Select 
+                value={formData.year} 
+                onValueChange={(value) => handleFormChange('year', value)}
+              >
+                <SelectTrigger id="year-select">
+                  <SelectValue placeholder="Select year" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">First Year</SelectItem>
+                  <SelectItem value="2">Second Year</SelectItem>
+                  <SelectItem value="3">Third Year</SelectItem>
+                  <SelectItem value="4">Fourth Year</SelectItem>
+                  <SelectItem value="5">Fifth Year</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="speciality-select">Speciality</Label>
+              <Select 
+                value={formData.speciality} 
+                onValueChange={(value) => handleFormChange('speciality', value)}
+                disabled={!formData.year}
+              >
+                <SelectTrigger id="speciality-select">
+                  <SelectValue placeholder="Select speciality" />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredSpecialities.map((speciality) => (
+                    <SelectItem key={speciality.id} value={speciality.name}>
+                      {speciality.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="section-select">Section</Label>
+              <Select 
+                value={selectedSection} 
+                onValueChange={setSelectedSection}
+                disabled={!formData.speciality || !formData.year}
+              >
+                <SelectTrigger id="section-select">
+                  <SelectValue placeholder="Select a section" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="A">Section A</SelectItem>
+                  <SelectItem value="B">Section B</SelectItem>
+                  <SelectItem value="C">Section C</SelectItem>
+                  <SelectItem value="D">Section D</SelectItem>
+                  <SelectItem value="1">Section 1</SelectItem>
+                  <SelectItem value="2">Section 2</SelectItem>
+                  <SelectItem value="3">Section 3</SelectItem>
+                  <SelectItem value="4">Section 4</SelectItem>
+                  <SelectItem value="5">Section 5</SelectItem>
+                  <SelectItem value="6">Section 6</SelectItem>
+                  <SelectItem value="7">Section 7</SelectItem>
+                </SelectContent>
+              </Select>
+              {!formData.speciality || !formData.year ? (
+                 <p className="text-sm text-gray-500">Select Speciality and Year to load sections.</p>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Schedule Table */}
+          <div className="rounded-md border">
+            <div className="relative w-full overflow-auto">
+              <table className="w-full caption-bottom text-sm">
+                <thead className="[&_tr]:border-b">
+                  <tr className="border-b transition-colors hover:bg-gray-50/50 data-[state=selected]:bg-gray-50">
+                    <th className="h-12 px-4 text-left align-middle font-medium">Day</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Time Slot</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Module</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Professor</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Room</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Type</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Groups</th>
+                    <th className="h-12 px-4 text-left align-middle font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="[&_tr:last-child]:border-0">
+                  {Array.isArray(sectionSchedules) && sectionSchedules
+                    .filter(schedule => schedule && schedule.section === selectedSection)
+                    .map((schedule, index) => (
+                      <tr key={index} className="border-b transition-colors hover:bg-gray-50/50 data-[state=selected]:bg-gray-50">
+                        <td className="p-4 align-middle">{schedule.day}</td>
+                        <td className="p-4 align-middle">{schedule.timeSlot}</td>
+                        <td className="p-4 align-middle">{schedule.module}</td>
+                        <td className="p-4 align-middle">{schedule.professor}</td>
+                        <td className="p-4 align-middle">{schedule.room}</td>
+                        <td className="p-4 align-middle">{schedule.type}</td>
+                        <td className="p-4 align-middle">{Array.isArray(schedule.groups) ? schedule.groups.join(', ') : ''}</td>
+                        <td className="p-4 align-middle">
+                          <div className="flex gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEditSectionScheduleClick(schedule)}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteSectionScheduleClick(schedule)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Add/Edit Section Schedule Dialog */}
+          <Dialog open={isAddSectionScheduleDialogOpen || isEditSectionScheduleDialogOpen} onOpenChange={isEditSectionScheduleDialogOpen ? setIsEditSectionScheduleDialogOpen : setIsAddSectionScheduleDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{isEditSectionScheduleDialogOpen ? 'Edit Section Schedule' : 'Add Section Schedule'}</DialogTitle>
+                <DialogDescription>
+                  {isEditSectionScheduleDialogOpen ? 'Edit the schedule entry.' : 'Add a new schedule entry for the selected section.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="day">Day</Label>
+                  <Select
+                    value={newSectionSchedule.day}
+                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, day: value }))}
+                  >
+                    <SelectTrigger id="day">
+                      <SelectValue placeholder="Select day" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'].map(day => (
+                        <SelectItem key={day} value={day}>{day}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="timeSlot">Time Slot</Label>
+                  <Input
+                    id="timeSlot"
+                    value={newSectionSchedule.timeSlot}
+                    onChange={(e) => setNewSectionSchedule(prev => ({ ...prev, timeSlot: e.target.value }))}
+                    placeholder="e.g., 10:00 - 12:00"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="module">Module</Label>
+                  <Select
+                    value={newSectionSchedule.module}
+                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, module: value }))}
+                  >
+                    <SelectTrigger id="module">
+                      <SelectValue placeholder="Select module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modules.map(module => (
+                        <SelectItem key={module.id} value={module.name}>
+                          {module.code} - {module.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="professor">Professor</Label>
+                  <Input
+                    id="professor"
+                    value={newSectionSchedule.professor}
+                    onChange={(e) => setNewSectionSchedule(prev => ({ ...prev, professor: e.target.value }))}
+                    placeholder="Enter professor name"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="room">Room</Label>
+                  <Select
+                    value={newSectionSchedule.room}
+                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, room: value }))}
+                  >
+                    <SelectTrigger id="room">
+                      <SelectValue placeholder="Select room" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {classrooms.map(room => (
+                        <SelectItem key={room.id} value={room.number}>
+                          {room.number} - {room.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="type">Type</Label>
+                  <Select
+                    value={newSectionSchedule.type}
+                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, type: value }))}
+                  >
+                    <SelectTrigger id="type">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['COURSE', 'TD', 'TP'].map(type => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="groups">Groups</Label>
+                  <Input
+                    id="groups"
+                    value={newSectionSchedule.groups.join(', ')}
+                    onChange={(e) => setNewSectionSchedule(prev => ({ 
+                      ...prev, 
+                      groups: e.target.value.split(',').map(g => g.trim()) 
+                    }))}
+                    placeholder="Enter groups (comma-separated)"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  isEditSectionScheduleDialogOpen ? setIsEditSectionScheduleDialogOpen(false) : setIsAddSectionScheduleDialogOpen(false);
+                }}>
+                  Cancel
+                </Button>
+                <Button 
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={isEditSectionScheduleDialogOpen ? handleEditSectionSchedule : handleAddSectionSchedule}
+                >
+                  {isEditSectionScheduleDialogOpen ? 'Save Changes' : 'Add Schedule'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          {/* Delete Section Schedule Dialog */}
+          <Dialog open={isDeleteSectionScheduleDialogOpen} onOpenChange={setIsDeleteSectionScheduleDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Delete Section Schedule</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete this schedule entry? This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              {selectedSchedule && (
+                <div className="py-4">
+                  <p className="text-sm text-gray-500">
+                    You are about to delete the schedule for Module: {selectedSchedule.module}, Day: {selectedSchedule.day}, Time: {selectedSchedule.timeSlot}.
+                  </p>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsDeleteSectionScheduleDialogOpen(false)}>Cancel</Button>
+                <Button variant="destructive" onClick={handleDeleteSectionSchedule}>Delete</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
       </Tabs>
     </div>

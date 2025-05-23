@@ -156,10 +156,183 @@ class ScheduleParser {
       }
 
       scheduleData.timeSlots = tableStructure.timeSlots;
-      scheduleData.scheduleEntries = this.parseTableEntries(
-        lines.slice(tableStructure.startIndex),
-        tableStructure.timeSlots
-      );
+      
+      // Log the lines we're about to parse
+      console.log('Lines to parse:', lines.slice(tableStructure.startIndex, tableStructure.startIndex + 10));
+      
+      // Process each line after the header
+      let currentDay = null;
+      let currentTimeSlotIndex = 0;
+      let currentEntry = null;
+      
+      for (let i = tableStructure.startIndex; i < lines.length; i++) {
+        const line = lines[i].trim();
+        console.log(`Processing line ${i}: "${line}"`);
+        
+        // Skip empty lines
+        if (!line) continue;
+        
+        // Check for day line with more flexible matching
+        if (this.isDayLine(line)) {
+          console.log(`Found day: ${line}`);
+          // Map abbreviated days to full names
+          const dayMap = {
+            'mon': 'Monday',
+            'tue': 'Tuesday',
+            'wed': 'Wednesday',
+            'thu': 'Thursday',
+            'fri': 'Friday',
+            'sat': 'Saturday',
+            'sun': 'Sunday'
+          };
+          currentDay = dayMap[line.toLowerCase()] || line.split(/\s+/)[0].trim();
+          currentTimeSlotIndex = 0;
+          continue;
+        }
+        
+        // Skip if no day is set
+        if (!currentDay) {
+          console.log('Skipping line - no day set');
+          continue;
+        }
+
+        // Check for course entry (e.g., "SEC SYSTEM course")
+        const courseMatch = line.match(/^(.+?)\s+course$/i);
+        if (courseMatch) {
+          console.log(`Found course entry: ${line}`);
+          // If we have a previous entry, save it
+          if (currentEntry && this.isValidEntry(currentEntry)) {
+            console.log('Saving previous entry:', currentEntry);
+            scheduleData.scheduleEntries.push(currentEntry);
+          }
+          
+          // Start new course entry
+          currentEntry = {
+            day: currentDay,
+            timeSlot: tableStructure.timeSlots[currentTimeSlotIndex],
+            type: 'COURSE',
+            modules: [courseMatch[1].trim()],
+            professors: [],
+            rooms: [],
+            groups: []
+          };
+          console.log('Created new course entry:', currentEntry);
+          continue;
+        }
+
+        // Try to parse the line as a group/room entry
+        const groupRoomMatch = line.match(/^G(\d+):(?:TP\.)?([A-Z0-9.]+)$/i);
+        if (groupRoomMatch) {
+          console.log(`Found group/room entry: ${line}`);
+          // If we have a previous entry, save it
+          if (currentEntry && this.isValidEntry(currentEntry)) {
+            console.log('Saving previous entry:', currentEntry);
+            scheduleData.scheduleEntries.push(currentEntry);
+          }
+          
+          // Start new entry
+          currentEntry = {
+            day: currentDay,
+            timeSlot: tableStructure.timeSlots[currentTimeSlotIndex],
+            type: 'unknown',
+            modules: [],
+            professors: [],
+            rooms: [],
+            groups: []
+          };
+
+          const [_, groupNum, roomInfo] = groupRoomMatch;
+          currentEntry.groups.push(groupNum);
+          
+          if (roomInfo.includes('TP')) {
+            currentEntry.type = 'TP';
+            currentEntry.rooms.push({
+              number: roomInfo.replace('TP', '').trim(),
+              type: 'SALLE_TP'
+            });
+          } else {
+            currentEntry.type = 'TD';
+            currentEntry.rooms.push({
+              number: roomInfo,
+              type: 'SALLE_TD'
+            });
+          }
+          console.log('Created new group/room entry:', currentEntry);
+          continue;
+        }
+
+        // Try to parse module and professor
+        const moduleProfMatch = line.match(/^\/(.+?)\s*--\s*([DP]W),\s*(.+)$/);
+        if (moduleProfMatch && currentEntry) {
+          console.log(`Found module/professor entry: ${line}`);
+          const [_, moduleName, dwPw, professorName] = moduleProfMatch;
+          currentEntry.modules.push(moduleName.trim());
+          currentEntry.professors.push(professorName.trim());
+          
+          if (currentEntry.type === 'unknown') {
+            currentEntry.type = dwPw === 'DW' ? 'COURSE' : 'TP';
+          }
+          
+          // Save the entry if it's valid
+          if (this.isValidEntry(currentEntry)) {
+            console.log('Saving module/professor entry:', currentEntry);
+            scheduleData.scheduleEntries.push(currentEntry);
+            currentEntry = null;
+            currentTimeSlotIndex = (currentTimeSlotIndex + 1) % tableStructure.timeSlots.length;
+          }
+          continue;
+        }
+
+        // Check for standalone room code (e.g., "SC")
+        const roomCodeMatch = line.match(/^([A-Z0-9]+)$/);
+        if (roomCodeMatch && currentEntry && currentEntry.type === 'COURSE') {
+          console.log(`Found room code: ${line}`);
+          currentEntry.rooms.push({
+            number: roomCodeMatch[1],
+            type: 'SALLE_COURS'
+          });
+          continue;
+        }
+
+        // Check for standalone professor name
+        if (line.length > 1 && !line.match(/^G\d+:/) && !line.match(/^\/.+--/) && !line.toLowerCase().includes('course')) {
+          console.log(`Found professor name: ${line}`);
+          if (currentEntry && !currentEntry.professors.includes(line)) {
+            currentEntry.professors.push(line.trim());
+            
+            // If this is a course entry with a professor, save it
+            if (currentEntry.type === 'COURSE' && this.isValidEntry(currentEntry)) {
+              console.log('Saving course entry with professor:', currentEntry);
+              scheduleData.scheduleEntries.push(currentEntry);
+              currentEntry = null;
+              currentTimeSlotIndex = (currentTimeSlotIndex + 1) % tableStructure.timeSlots.length;
+            }
+          }
+        }
+      }
+
+      // Save the last entry if it exists and is valid
+      if (currentEntry && this.isValidEntry(currentEntry)) {
+        console.log('Saving final entry:', currentEntry);
+        scheduleData.scheduleEntries.push(currentEntry);
+      }
+
+      // Log the results
+      console.log('Parsed schedule data:', {
+        timeSlots: scheduleData.timeSlots.length,
+        entries: scheduleData.scheduleEntries.length,
+        firstEntry: scheduleData.scheduleEntries[0]
+      });
+
+      // Validate the data before returning
+      const validation = this.validateScheduleData(scheduleData);
+      if (!validation.isValid) {
+        console.error('Schedule data validation failed:', validation.errors);
+        return {
+          success: false,
+          error: `Invalid schedule data: ${validation.errors.join(', ')}`
+        };
+      }
 
       return {
         success: true,
@@ -273,57 +446,73 @@ class ScheduleParser {
    * @returns {Object} Table structure information
    */
   static detectTableStructure(lines) {
-    // Look for table indicators with more flexible patterns
-    const tableIndicators = [
-      /^\s*[|]\s*.*[|]\s*$/,  // Lines with pipes
-      /^\s*\d{1,2}[:]\d{2}\s*[-]\s*\d{1,2}[:]\d{2}/,  // Time patterns
-      /monday|tuesday|wednesday|thursday|friday|saturday|sunday/i,
-      /^\s*\d{1,2}[:]\d{2}/,  // Just time without range
-      /^\s*[A-Za-z]+\s*[-]\s*\d{1,2}[:]\d{2}/,  // Day - time format
-      /^\s*[A-Za-z]+\s*[,]\s*\d{1,2}[:]\d{2}/   // Day, time format
-    ];
-
     let startIndex = -1;
     let timeSlots = [];
+    let headerBlockEndIndex = -1;
+    let potentialHeaderLines = [];
 
-    // First pass: look for time slots
+    // Find the lines that contain time slots - these are likely the header
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // Try to extract time slots from current line
-      timeSlots = this.extractTimeSlotsFromLine(line);
-      
-      if (timeSlots.length > 0) {
-        startIndex = i;
-        break;
-      }
-      
-      // If no time slots found, check for day patterns
-      if (tableIndicators.some(pattern => pattern.test(line))) {
-        startIndex = i;
-        // Try to extract time slots from next line
-        if (i + 1 < lines.length) {
-          timeSlots = this.extractTimeSlotsFromLine(lines[i + 1]);
-        }
-        break;
-      }
-    }
+      const line = lines[i].trim();
+      const timeSlotsInLine = this.extractTimeSlotsFromLine(line);
 
-    // If no time slots found but we have a start index, try to find time slots in subsequent lines
-    if (startIndex !== -1 && timeSlots.length === 0) {
-      for (let i = startIndex + 1; i < Math.min(startIndex + 5, lines.length); i++) {
-        timeSlots = this.extractTimeSlotsFromLine(lines[i]);
-        if (timeSlots.length > 0) {
-          startIndex = i;
-          break;
+      if (timeSlotsInLine.length > 0) {
+        // Found a line with time slots, start collecting potential header lines
+        potentialHeaderLines.push(line);
+        headerBlockEndIndex = i;
+
+        // Check the next few lines to see if they are part of the header
+        for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+             const nextLine = lines[j].trim();
+             const moreTimeSlots = this.extractTimeSlotsFromLine(nextLine);
+             // If the next line contains more time slots, is empty, or starts with a pipe, consider it a continuation
+             if (moreTimeSlots.length > 0 || nextLine === '' || nextLine.match(/^\s*[|]/)) {
+                 potentialHeaderLines.push(nextLine);
+                 headerBlockEndIndex = j; // Update end index
+             } else {
+                 break; // Stop if the pattern is broken
+             }
+        }
+
+        // Combine potential header lines and extract time slots
+        const combinedHeader = potentialHeaderLines.join(' ');
+        timeSlots = this.extractTimeSlotsFromLine(combinedHeader);
+
+        // If we found multiple time slots, we consider the header found
+        if (timeSlots.length > 1) {
+           // Log detected header information
+           console.log('Detected Header Lines:', potentialHeaderLines); // Log header lines
+           console.log('Extracted Time Slots:', timeSlots); // Log extracted time slots
+
+           // The start index of the table entries is the first line AFTER the header block that contains a day
+           startIndex = lines.findIndex((line, index) => 
+             index > headerBlockEndIndex && this.isDayLine(line.trim().split(/[|\t]/)[0])
+           );
+            
+            // Fallback: If no clear day line found immediately after header, just start after the header block
+            if (startIndex === -1) {
+                startIndex = headerBlockEndIndex + 1;
+            }
+
+           // Log calculated start index and initial lines for parsing
+           console.log('Calculated Table Start Index:', startIndex); // Log start index
+           console.log('Lines from Start Index (first 10):', lines.slice(startIndex, startIndex + 10)); // Log first 10 table lines
+
+           break; // Found and processed the header, exit main loop
+        } else {
+            // Not enough time slots detected in this potential header block, reset and continue search
+            potentialHeaderLines = [];
+            timeSlots = [];
+            startIndex = -1;
+            headerBlockEndIndex = -1; // Reset end index
         }
       }
     }
 
     return {
-      found: startIndex !== -1,
+      found: timeSlots.length > 0 && startIndex !== -1,
       startIndex,
-      timeSlots
+      timeSlots: timeSlots
     };
   }
 
@@ -333,49 +522,54 @@ class ScheduleParser {
    * @returns {Array} Array of time slots
    */
   static extractTimeSlotsFromLine(line) {
-    const timeSlots = [];
-    
+    const timeSlots = new Set(); // Use a Set to automatically handle duplicates
+
     // More flexible time patterns
     const timePatterns = [
-      /\d{1,2}[:]\d{2}\s*[-]\s*\d{1,2}[:]\d{2}/,  // 09:00 - 10:30
-      /\d{1,2}[:]\d{2}/,  // Just time
-      /\d{1,2}[h]\d{2}/,  // French format
-      /\d{1,2}[.]\d{2}/   // Alternative format
+      /(\d{1,2}[:.]\d{2})\s*[-–—]\s*(\d{1,2}[:.]\d{2})/g,  // HH:MM - HH:MM or HH.MM - HH.MM with various hyphens
+      /(\d{1,2}[h.]\d{2})\s*[-–—]\s*(\d{1,2}[h.]\d{2})/g, // HHhMM - HHhMM or HH.MM - HH.MM (French/alternative)
+      /(\d{1,2}[:.]\d{2})\s*[àto]\s*(\d{1,2}[:.]\d{2})/g,  // HH:MM à HH:MM or HH.MM to HH.MM
+      /(\d{1,2}[:.]\d{2})/g,  // Just HH:MM or HH.MM
+      /(\d{1,2}[h.]\d{2})/g   // Just HHhMM or HH.MM
     ];
-    
-    // Split by common delimiters
-    const parts = line.split(/[|\t,;]/).map(part => part.trim());
-    
-    for (const part of parts) {
-      for (const pattern of timePatterns) {
-        const match = part.match(pattern);
-        if (match) {
-          timeSlots.push(match[0]);
-          break;
-        }
-      }
-    }
-    
-    return timeSlots;
-  }
 
-  /**
-   * Parse table entries from lines
-   * @param {Array} tableLines - Lines containing table data
-   * @param {Array} timeSlots - Available time slots
-   * @returns {Array} Schedule entries
-   */
-  static parseTableEntries(tableLines, timeSlots) {
-    const entries = [];
-    
-    for (const line of tableLines) {
-      if (this.isDayLine(line)) {
-        const dayEntries = this.parseDayLine(line, timeSlots);
-        entries.push(...dayEntries);
-      }
+    // Clean the line by replacing multiple spaces with single space and handling potential stray characters
+    const cleanedLine = line.replace(/\s+/g, ' ').replace(/[^\x20-\x7E]/g, ''); // Remove non-ASCII chars
+
+    for (const pattern of timePatterns) {
+        let match;
+        while ((match = pattern.exec(cleanedLine)) !== null) {
+            // For range patterns (first two), extract both start and end times
+            if (match[2]) { 
+                const startTime = match[1].replace(/[h.]/g, ':');
+                const endTime = match[2].replace(/[h.]/g, ':');
+                // Normalize range separator for consistency
+                timeSlots.add(`${startTime} - ${endTime}`);
+            } else { 
+                // For single time patterns, add the time directly
+                const singleTime = match[1].replace(/[h.]/g, ':');
+                 // Only add if it looks like a potential start or end of a range (optional: may add noise)
+                 // For now, just add it, relying on the range patterns to capture the full slots first
+                 timeSlots.add(singleTime);
+            }
+        }
     }
-    
-    return entries;
+
+     // Convert Set to Array, filter to keep only ranges if ranges were found, otherwise keep all unique times
+     const timeSlotsArray = Array.from(timeSlots);
+     const rangeTimeSlots = timeSlotsArray.filter(ts => ts.includes(' - '));
+
+     if(rangeTimeSlots.length > 0) {
+         // Sort range time slots
+         return rangeTimeSlots.sort((a, b) => {
+             const [aStart] = a.split(' - ');
+             const [bStart] = b.split(' - ');
+             return aStart.localeCompare(bStart);
+         });
+     } else {
+         // If no ranges found, return all unique single times, sorted
+          return timeSlotsArray.sort((a, b) => a.localeCompare(b));
+     }
   }
 
   /**
@@ -384,94 +578,141 @@ class ScheduleParser {
    * @returns {boolean} True if it's a day line
    */
   static isDayLine(line) {
-    const dayPattern = /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i;
+    // More flexible day pattern that matches both full names and abbreviations
+    const dayPattern = /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|mon|tue|wed|thu|fri|sat|sun)$/i;
     return dayPattern.test(line.trim());
   }
 
   /**
-   * Parse a day line into schedule entries
-   * @param {string} line - Day line to parse
-   * @param {Array} timeSlots - Available time slots
-   * @returns {Array} Schedule entries for the day
+   * Parse table entries from lines
+   * @param {Array} tableLines - Lines containing table data, starting from the first day
+   * @param {Array} timeSlots - Available time slots (sorted)
+   * @returns {Array} Schedule entries
    */
-  static parseDayLine(line, timeSlots) {
-    const columns = line.split(/[|\t]/).map(col => col.trim());
-    const day = columns[0];
+  static parseTableEntries(tableLines, timeSlots) {
     const entries = [];
+    let currentDay = null;
+    let dayContentLines = [];
+    let currentTimeSlotIndex = 0;
 
-    for (let i = 1; i < columns.length && i <= timeSlots.length; i++) {
-      const cellContent = columns[i];
-      if (cellContent && cellContent.length > 0) {
-        const cellEntries = this.parseScheduleCell(
-          cellContent,
-          day,
-          timeSlots[i - 1]
-        );
-        entries.push(...cellEntries);
+    for (let i = 0; i < tableLines.length; i++) {
+      const line = tableLines[i].trim();
+      
+      // Enhanced day detection
+      if (this.isDayLine(line) || line.match(/^(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i)) {
+        // Process previous day's content if exists
+        if (currentDay && dayContentLines.length > 0) {
+          const dayEntries = this.parseDayBlock(currentDay, dayContentLines, timeSlots);
+          entries.push(...dayEntries);
+        }
+        
+        // Start new day
+        currentDay = line.split(/\s+/)[0].trim();
+        dayContentLines = [];
+        currentTimeSlotIndex = 0;
+        continue;
       }
+
+      // Skip empty lines
+      if (!line) continue;
+
+      // Check if line contains a time slot
+      const timeSlotMatch = line.match(/(\d{1,2}[:.]\d{2})\s*[-–—]\s*(\d{1,2}[:.]\d{2})/);
+      if (timeSlotMatch) {
+        currentTimeSlotIndex = timeSlots.findIndex(slot => 
+          slot.includes(timeSlotMatch[1]) || slot.includes(timeSlotMatch[2])
+        );
+        if (currentTimeSlotIndex === -1) currentTimeSlotIndex = 0;
+      }
+
+      // Collect content lines
+      if (currentDay !== null) {
+        dayContentLines.push(line);
+        
+        // Try to parse entry immediately if it looks complete
+        if (line.match(/(?:G\d+:|course|TP|TD)/i)) {
+          const entry = this.parseSingleEntryBlock(line, currentDay, timeSlots[currentTimeSlotIndex]);
+          if (entry && this.isValidEntry(entry)) {
+            entries.push(entry);
+            currentTimeSlotIndex = (currentTimeSlotIndex + 1) % timeSlots.length;
+            dayContentLines = []; // Clear after successful parse
+          }
+        }
+      }
+    }
+
+    // Process the last day's content
+    if (currentDay && dayContentLines.length > 0) {
+      const dayEntries = this.parseDayBlock(currentDay, dayContentLines, timeSlots);
+      entries.push(...dayEntries);
     }
 
     return entries;
   }
 
   /**
-   * Enhanced schedule cell parser
-   * @param {string} cellContent - Content of the cell
-   * @param {string} day - Day of the week
-   * @param {string} timeSlot - Time slot
-   * @returns {Array} Array of schedule entries
+   * Parse all content lines belonging to a single day block and extract entries
+   * @param {string} day - The day of the entries
+   * @param {Array} contentLines - Lines of text content for this day's block
+   * @param {Array} timeSlots - Available time slots (sorted)
+   * @returns {Array} Schedule entries for the day
    */
-  static parseScheduleCell(cellContent, day, timeSlot) {
-    if (!cellContent?.trim()) return [];
+  static parseDayBlock(day, contentLines, timeSlots) {
+    const entries = [];
+    const combinedContent = contentLines.join('\n').trim();
+    
+    // Enhanced entry pattern matching
+    const entryPatterns = [
+      /(G\d+:[^\n]*\n?\/[^\n]*--\s*[DP]W,[^\n]*)/,  // TP/TD pattern
+      /([^\n]*\s+course[^\n]*)/,                     // Course pattern
+      /(G\d+:[^\n]*)/,                              // Group pattern
+      /([^\n]*TP[^\n]*)/,                           // TP pattern
+      /([^\n]*TD[^\n]*)/                            // TD pattern
+    ];
 
-    try {
-      // Split content into logical parts
-      const parts = this.splitCellContent(cellContent);
-      const entries = [];
+    let timeSlotIndex = 0;
+    let remainingContent = combinedContent;
 
-      for (const part of parts) {
-        const entry = this.createBaseEntry(day, timeSlot);
-        this.enrichEntry(entry, part);
-        
-        if (this.isValidEntry(entry)) {
-          entries.push(entry);
+    while (remainingContent) {
+      let bestMatch = null;
+      let bestPattern = null;
+
+      // Find the best matching pattern
+      for (const pattern of entryPatterns) {
+        const match = remainingContent.match(pattern);
+        if (match && (!bestMatch || match[0].length > bestMatch[0].length)) {
+          bestMatch = match;
+          bestPattern = pattern;
         }
       }
 
-      return entries;
-    } catch (error) {
-      console.error('Error parsing cell:', error);
-      return [];
+      if (!bestMatch) break;
+
+      const entryText = bestMatch[0].trim();
+      const timeSlot = timeSlots[timeSlotIndex % timeSlots.length];
+      
+      const entry = this.parseSingleEntryBlock(entryText, day, timeSlot);
+      if (entry && this.isValidEntry(entry)) {
+        entries.push(entry);
+        timeSlotIndex++;
+      }
+
+      // Remove the matched content and continue
+      remainingContent = remainingContent.slice(bestMatch.index + bestMatch[0].length).trim();
     }
+
+    return entries;
   }
 
   /**
-   * Split cell content into logical parts
-   * @param {string} content - Cell content
-   * @returns {Array} Array of content parts
-   */
-  static splitCellContent(content) {
-    // Split on group patterns (G1:, G2:, etc.)
-    const groupPattern = /(?=G\d+:)/g;
-    let parts = content.split(groupPattern).filter(Boolean);
-    
-    // If no groups found, treat as single part
-    if (parts.length === 1 && !parts[0].includes('G')) {
-      // Try splitting on newlines or other delimiters
-      parts = content.split(/[\n\r]+/).filter(Boolean);
-    }
-    
-    return parts;
-  }
-
-  /**
-   * Create a base entry structure
+   * Parse text for a single entry block (e.g., TP/TD or Course) and extract details
+   * @param {string} blockContent - Text content for a single entry block
    * @param {string} day - Day of the week
    * @param {string} timeSlot - Time slot
-   * @returns {Object} Base entry
+   * @returns {Object|null} Parsed entry object or null if parsing fails
    */
-  static createBaseEntry(day, timeSlot) {
-    return {
+  static parseSingleEntryBlock(blockContent, day, timeSlot) {
+    const entry = {
       day: day || '',
       timeSlot: timeSlot || '',
       type: 'unknown',
@@ -480,96 +721,80 @@ class ScheduleParser {
       rooms: [],
       groups: []
     };
-  }
 
-  /**
-   * Enrich entry with parsed information
-   * @param {Object} entry - Entry to enrich
-   * @param {string} content - Content to parse
-   */
-  static enrichEntry(entry, content) {
-    const lines = content.split(/[\n\r]+/).map(line => line.trim()).filter(Boolean);
+    // Split content into lines and clean them
+    const lines = blockContent.split('\n').map(line => line.trim()).filter(Boolean);
     
-    for (const line of lines) {
-      // Group pattern: G1:457, G2:TP126
-      const groupMatch = line.match(/^G(\d+):(.*)$/);
-      if (groupMatch) {
-        entry.groups.push(`G${groupMatch[1]}`);
-        this.parseGroupInfo(entry, groupMatch[2]);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Check for group and room pattern (e.g., "G1:TP122")
+      const groupRoomMatch = line.match(/^G(\d+):(?:TP\.)?([A-Z0-9.]+)$/i);
+      if (groupRoomMatch) {
+        const [_, groupNum, roomInfo] = groupRoomMatch;
+        entry.groups.push(groupNum);
+        
+        // Determine type from room info
+        if (roomInfo.includes('TP')) {
+          entry.type = 'TP';
+          entry.rooms.push({
+            number: roomInfo.replace('TP', '').trim(),
+            type: 'SALLE_TP'
+          });
+        } else {
+          entry.type = 'TD';
+          entry.rooms.push({
+            number: roomInfo,
+            type: 'SALLE_TD'
+          });
+        }
         continue;
       }
-      
-      // Module and professor pattern: /Module -- DW, Professor Name
-      const moduleMatch = line.match(/^\/(.+?)\s*--\s*[DP]W,\s*(.+)$/);
-      if (moduleMatch) {
-        entry.modules.push(moduleMatch[1].trim());
-        entry.professors.push(moduleMatch[2].trim());
-        continue;
-      }
-      
-      // Course pattern: Module Name course
-      const courseMatch = line.match(/^(.+?)\s+course$/i);
-      if (courseMatch) {
-        entry.type = 'COURSE';
-        entry.modules.push(courseMatch[1].trim());
-        continue;
-      }
-      
-      // Standalone module or professor
-      this.parseStandaloneLine(entry, line);
-    }
-  }
 
-  /**
-   * Parse group information
-   * @param {Object} entry - Entry to update
-   * @param {string} groupInfo - Group information string
-   */
-  static parseGroupInfo(entry, groupInfo) {
-    const info = groupInfo.trim();
-    
-    // TP room pattern
-    if (info.includes('TP')) {
-      entry.type = 'TP';
-      const tpMatch = info.match(/TP(\d+)/);
-      if (tpMatch) {
+      // Check for module and professor pattern (e.g., "/Res Proto -- PW, Bouachi")
+      const moduleProfMatch = line.match(/^\/(.+?)\s*--\s*([DP]W),\s*(.+)$/);
+      if (moduleProfMatch) {
+        const [_, moduleName, dwPw, professorName] = moduleProfMatch;
+        entry.modules.push(moduleName.trim());
+        entry.professors.push(professorName.trim());
+        
+        // Set type based on DW/PW if not already set
+        if (entry.type === 'unknown') {
+          entry.type = dwPw === 'DW' ? 'COURSE' : 'TP';
+        }
+        continue;
+      }
+
+      // Check for standalone room number (e.g., "170")
+      const roomMatch = line.match(/^(\d+)$/);
+      if (roomMatch && entry.type === 'COURSE') {
         entry.rooms.push({
-          number: tpMatch[1],
-          type: 'SALLE_TP'
+          number: roomMatch[1],
+          type: 'SALLE_COURS'
         });
+        continue;
       }
-    }
-    // Regular room number
-    else if (/^\d+$/.test(info)) {
-      entry.type = entry.type === 'unknown' ? 'TD' : entry.type;
-      entry.rooms.push({
-        number: info,
-        type: entry.type === 'COURSE' ? 'SALLE_COURS' : 'SALLE_TD'
-      });
-    }
-  }
 
-  /**
-   * Parse standalone line (professor, room, etc.)
-   * @param {Object} entry - Entry to update
-   * @param {string} line - Line to parse
-   */
-  static parseStandaloneLine(entry, line) {
-    // Short alphanumeric: likely a room
-    if (line.length <= 4 && /^[A-Z0-9]+$/i.test(line)) {
-      entry.rooms.push({
-        number: line,
-        type: entry.type === 'COURSE' ? 'SALLE_COURS' : 'SALLE_TD'
-      });
-    }
-    // Longer text: likely professor or module
-    else if (line.length > 4 && !line.includes(':') && !line.includes('--')) {
-      if (entry.modules.length === 0) {
-        entry.modules.push(line);
-      } else if (entry.professors.length === 0) {
-        entry.professors.push(line);
+      // Check for standalone professor name
+      if (line.length > 1 && !line.match(/^G\d+:/) && !line.match(/^\/.+--/) && !line.toLowerCase().includes('course')) {
+        if (!entry.professors.includes(line)) {
+          entry.professors.push(line.trim());
+        }
       }
     }
+
+    // Log the parsed entry for debugging
+    console.log('Parsed entry:', {
+      day: entry.day,
+      timeSlot: entry.timeSlot,
+      type: entry.type,
+      modules: entry.modules,
+      professors: entry.professors,
+      rooms: entry.rooms,
+      groups: entry.groups
+    });
+
+    return this.isValidEntry(entry) ? entry : null;
   }
 
   /**
@@ -578,9 +803,23 @@ class ScheduleParser {
    * @returns {boolean} True if valid
    */
   static isValidEntry(entry) {
-    return entry.groups.length > 0 || 
-           entry.modules.length > 0 || 
-           entry.professors.length > 0;
+    if (!entry) return false;
+
+    // For course entries, we need at least a module
+    if (entry.type === 'COURSE') {
+      return entry.modules && entry.modules.length > 0;
+    }
+
+    // For TP/TD entries, we need at least a group and a module
+    if (entry.type === 'TP' || entry.type === 'TD') {
+      return (entry.groups && entry.groups.length > 0) && 
+             (entry.modules && entry.modules.length > 0);
+    }
+
+    // For unknown type, require at least one of: groups, modules, or professors
+    return (entry.groups && entry.groups.length > 0) ||
+           (entry.modules && entry.modules.length > 0) ||
+           (entry.professors && entry.professors.length > 0);
   }
 
   /**
@@ -759,18 +998,25 @@ class ScheduleParser {
   static convertDayToEnum(day) {
     const dayMap = {
       'monday': 'MONDAY',
-      'tuesday': 'TUESDAY', 
+      'tuesday': 'TUESDAY',
       'wednesday': 'WEDNESDAY',
       'thursday': 'THURSDAY',
       'friday': 'FRIDAY',
       'saturday': 'SATURDAY',
-      'sunday': 'SUNDAY'
+      'sunday': 'SUNDAY',
+      'lundi': 'MONDAY',
+      'mardi': 'TUESDAY',
+      'mercredi': 'WEDNESDAY',
+      'jeudi': 'THURSDAY',
+      'vendredi': 'FRIDAY',
+      'samedi': 'SATURDAY',
+      'dimanche': 'SUNDAY'
     };
     return dayMap[day.toLowerCase()] || 'MONDAY';
   }
 
   static extractTimeRange(timeSlot) {
-    const match = timeSlot.match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
+    const match = timeSlot.match(/(\d{1,2}[:]\d{2})\s*-\s*(\d{1,2}[:]\d{2})/);
     return match ? [match[1], match[2]] : ['00:00', '00:00'];
   }
 
@@ -801,6 +1047,95 @@ class ScheduleParser {
         timestamp: new Date().toISOString()
       };
     }
+  }
+
+  /**
+   * Validate schedule data structure and content
+   * @param {Object} data - Schedule data to validate
+   * @returns {Object} Validation result
+   */
+  static validateScheduleData(data) {
+    const errors = [];
+    const warnings = []; // Use warnings for non-critical issues like missing header info
+    
+    if (!data) {
+      return {
+        isValid: false,
+        errors: ['No data provided']
+      };
+    }
+
+    // Check header info (now as warnings)
+    if (!data.headerInfo) {
+      warnings.push('Missing header information object');
+    } else {
+      if (!data.headerInfo.speciality) {
+        warnings.push('Missing speciality information in header');
+      }
+      if (!data.headerInfo.section) {
+        warnings.push('Missing section information in header');
+      }
+      // Add checks for other critical header fields if necessary, as warnings
+      if (!data.headerInfo.academicYear) {
+           warnings.push('Missing academic year information in header');
+      }
+       if (!data.headerInfo.semester) {
+            warnings.push('Missing semester information in header');
+       }
+    }
+
+    // Check time slots (critical)
+    if (!data.timeSlots || !Array.isArray(data.timeSlots) || data.timeSlots.length === 0) {
+      errors.push('No time slots found'); // This remains a critical error
+    }
+
+    // Check schedule entries (critical)
+    if (!data.scheduleEntries || !Array.isArray(data.scheduleEntries) || data.scheduleEntries.length === 0) {
+      errors.push('No schedule entries found'); // This remains a critical error
+    } else {
+      // Basic validation for each entry - still critical if essential fields are missing
+      data.scheduleEntries.forEach((entry, index) => {
+        if (!entry.day) {
+          errors.push(`Entry ${index + 1}: Missing day`);
+        }
+        if (!entry.timeSlot) {
+          errors.push(`Entry ${index + 1}: Missing time slot`);
+        }
+        // Relaxing requirement for modules/professors/rooms/groups in individual entries
+        // An entry is valid if it has day and timeSlot
+        // Further validation of entry content might be needed depending on import requirements
+      });
+    }
+
+    return {
+      isValid: errors.length === 0, // Validation passes if no critical errors
+      errors,
+      warnings
+    };
+  }
+
+  /**
+   * Format schedule data for database storage
+   * @param {Object} data - Schedule data to format
+   * @returns {Object} Formatted data
+   */
+  static formatForDatabase(data) {
+    if (!data || !data.scheduleEntries) {
+      return data;
+    }
+
+    return {
+      ...data,
+      scheduleEntries: data.scheduleEntries.map(entry => ({
+        ...entry,
+        day: this.convertDayToEnum(entry.day),
+        timeSlot: entry.timeSlot,
+        modules: entry.modules || [],
+        professors: entry.professors || [],
+        rooms: entry.rooms || [],
+        groups: entry.groups || []
+      }))
+    };
   }
 }
 

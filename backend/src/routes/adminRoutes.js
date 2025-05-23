@@ -726,4 +726,542 @@ router.post('/import-specialities', isAuthenticated, isAdmin, upload.single('fil
   }
 });
 
+// Add new endpoint to fetch sections by speciality and year
+router.get('/sections', authenticate, async (req, res) => {
+  try {
+    const { speciality: specialityName, year: academicYear } = req.query;
+
+    if (!specialityName || !academicYear) {
+      return res.status(400).json({
+        success: false,
+        message: 'Speciality and year are required query parameters'
+      });
+    }
+
+    // Find the speciality and year to get their IDs
+    const speciality = await prisma.speciality.findFirst({
+      where: { name: specialityName }
+    });
+
+     // Find the academic year record
+     const yearRecord = await prisma.year.findFirst({
+      where: { name: academicYear.toString() } // Assuming academicYear is a number
+    });
+
+    if (!speciality || !yearRecord) {
+       // Attempt to find by academic year as integer if parsing failed
+       const yearRecordInt = await prisma.year.findFirst({
+           where: { name: parseInt(academicYear) } // Try parsing as integer
+       });
+
+       if(!speciality || !yearRecordInt){
+            return res.status(404).json({
+               success: false,
+               message: 'Speciality or year not found'
+            });
+       }
+        // Use the found integer year record if found
+        yearRecord = yearRecordInt;
+    }
+
+    // Fetch sections linked to modules of this speciality and year
+    const sections = await prisma.section.findMany({
+      where: {
+        academicYear: parseInt(academicYear), // Filter by academic year (integer)
+        module: {
+          specialityId: speciality.id,
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        // Include other relevant section data if needed
+      },
+      distinct: ['name'], // Get unique section names
+      orderBy: { name: 'asc' }
+    });
+
+    res.json({
+      success: true,
+      sections
+    });
+
+  } catch (error) {
+    console.error('Error fetching sections:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch sections: ' + error.message
+    });
+  }
+});
+
+// Add new endpoints for managing section schedules (ScheduleSlot)
+
+// Get schedule slots by section, speciality, year, and semester
+router.get('/schedules/section', authenticate, async (req, res) => {
+  try {
+    const { section: sectionName, speciality: specialityName, year: academicYear, semester } = req.query;
+
+    console.log('Received request with params:', { sectionName, specialityName, academicYear, semester });
+
+    if (!sectionName || !specialityName || !academicYear || !semester) {
+      return res.status(400).json({
+        success: false,
+        message: 'Section, speciality, year, and semester are required query parameters'
+      });
+    }
+
+    // Find the speciality with a more flexible search
+    const speciality = await prisma.speciality.findFirst({
+      where: {
+        OR: [
+          { name: specialityName },
+          { name: specialityName.replace(/\+/g, ' ') },
+          { name: { contains: specialityName.replace(/\+/g, ' ') } },
+          { name: { contains: specialityName } }
+        ]
+      }
+    });
+
+    console.log('Found speciality:', speciality);
+
+    // Convert academicYear to string for the query
+    const yearRecord = await prisma.year.findFirst({
+      where: { 
+        OR: [
+          { name: academicYear.toString() },
+          { name: academicYear },
+          { name: parseInt(academicYear).toString() },
+          { name: `First Year` },
+          { name: `Second Year` },
+          { name: `Third Year` },
+          { name: `Fourth Year` },
+          { name: `Fifth Year` }
+        ]
+      }
+    });
+
+    console.log('Found year record:', yearRecord);
+
+    if (!speciality || !yearRecord) {
+      console.log('Missing speciality or year:', { speciality, yearRecord });
+      return res.status(404).json({
+        success: false,
+        message: 'Speciality or year not found',
+        details: {
+          specialityFound: !!speciality,
+          yearFound: !!yearRecord,
+          searchedSpeciality: specialityName,
+          searchedYear: academicYear
+        }
+      });
+    }
+
+    // Find modules for this speciality, year, and semester
+    const modules = await prisma.module.findMany({
+      where: {
+        specialityId: speciality.id,
+        academicYear: parseInt(academicYear),
+        semestre: semester.toUpperCase()
+      },
+      select: { id: true }
+    });
+
+    console.log('Found modules:', modules);
+
+    if (modules.length === 0) {
+      return res.json({ success: true, scheduleSlots: [] });
+    }
+
+    const moduleIds = modules.map(m => m.id);
+
+    // Find the section within these modules
+    const section = await prisma.section.findFirst({
+      where: {
+        name: sectionName,
+        academicYear: parseInt(academicYear),
+        moduleId: { in: moduleIds }
+      },
+      select: { id: true }
+    });
+
+    console.log('Found section:', section);
+
+    if (!section) {
+      return res.status(404).json({
+        success: false,
+        message: 'Section not found for the given criteria',
+        details: {
+          sectionName,
+          academicYear,
+          moduleIds
+        }
+      });
+    }
+
+    // Fetch schedule slots for the found section
+    const scheduleSlots = await prisma.scheduleSlot.findMany({
+      where: {
+        sectionId: section.id,
+      },
+      include: {
+        module: { select: { code: true, name: true } },
+        owner: { select: { name: true } },
+        room: { select: { number: true, type: true } },
+      },
+      orderBy: [
+        { dayOfWeek: 'asc' },
+        { startTime: 'asc' },
+      ]
+    });
+
+    console.log('Found schedule slots:', scheduleSlots.length);
+
+    res.json({
+      success: true,
+      scheduleSlots
+    });
+
+  } catch (error) {
+    console.error('Error fetching section schedules:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch section schedules: ' + error.message
+    });
+  }
+});
+
+// Add a new schedule slot for a section
+router.post('/schedules/section', authenticate, async (req, res) => {
+  try {
+    const { section: sectionName, speciality: specialityName, year: academicYear, semester, day, timeSlot, module: moduleName, professor: professorName, room: roomNumber, type, groups } = req.body;
+
+    if (!sectionName || !specialityName || !academicYear || !semester || !day || !timeSlot || !moduleName || !professorName || !roomNumber || !type || !groups) {
+      return res.status(400).json({
+        success: false,
+        message: 'All required fields must be provided'
+      });
+    }
+
+    // Find or create related entities (speciality, year, module, section, professor, room)
+    const speciality = await prisma.speciality.upsert({
+      where: { name: specialityName },
+      update: {},
+      create: { name: specialityName, palierId: 1, yearId: 1 } // Default palier/year, adjust as needed
+    });
+
+    // Find or create year - ensure academicYear is treated as a string
+    const year = await prisma.year.upsert({
+      where: {
+        name_palierId: {
+          name: String(academicYear),
+          palierId: speciality.palierId
+        }
+      },
+      update: {},
+      create: {
+        name: String(academicYear),
+        description: `Year ${academicYear}`,
+        palierId: speciality.palierId
+      }
+    });
+
+    console.log('Found/created year:', year);
+
+     const module = await prisma.module.upsert({
+        where: { code: moduleName, academicYear: parseInt(academicYear) }, // Assuming moduleName is code or unique identifier
+        update: {},
+        create: {
+            code: moduleName,
+            name: moduleName, // Or infer name if code is used
+            academicYear: parseInt(academicYear),
+            palierId: speciality.palierId, // Inherit from speciality
+            yearId: year.id, // Link to year record
+            semestre: semester.toUpperCase(),
+            specialityId: speciality.id,
+        }
+    });
+
+    const section = await prisma.section.upsert({
+        where: { name: sectionName, moduleId: module.id, academicYear: parseInt(academicYear) },
+        update: {},
+        create: { name: sectionName, moduleId: module.id, academicYear: parseInt(academicYear) }
+    });
+
+    const professor = await prisma.user.upsert({
+      where: { email: `${professorName.toLowerCase().replace(/\s+/g, '.')}}@usthb.dz` }, // Assuming email format
+      update: { name: professorName },
+      create: { name: professorName, email: `${professorName.toLowerCase().replace(/\s+/g, '.')}}@usthb.dz`, role: 'PROFESSOR' }
+    });
+
+    const room = await prisma.room.upsert({
+      where: { number: roomNumber },
+      update: {},
+      create: { number: roomNumber, name: `Room ${roomNumber}`, type: type.toUpperCase(), capacity: 0 } // Default capacity/name
+    });
+
+    // Create the schedule slot
+    const scheduleSlot = await prisma.scheduleSlot.create({
+      data: {
+        dayOfWeek: day.toUpperCase(),
+        startTime: timeSlot.split(' - ')[0],
+        endTime: timeSlot.split(' - ')[1] || timeSlot.split(' - ')[0], // Handle single time entry
+        type: type.toUpperCase(),
+        group: groups.join(','), // Store groups as comma-separated string
+        ownerId: professor.id,
+        moduleId: module.id,
+        sectionId: section.id,
+        roomId: room.id,
+        isAvailable: false, // Manually added schedules are initially not available for swaps
+      }
+    });
+
+    res.json({
+      success: true,
+      scheduleSlot
+    });
+
+  } catch (error) {
+    console.error('Error adding section schedule:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add section schedule: ' + error.message
+    });
+  }
+});
+
+// Update a schedule slot for a section
+router.put('/schedules/section/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { day, timeSlot, module: moduleName, professor: professorName, room: roomNumber, type, groups } = req.body;
+
+    // Find related entities based on updated data
+    const module = moduleName ? await prisma.module.findFirst({ where: { code: moduleName } }) : undefined; // Assuming moduleName is code
+    const professor = professorName ? await prisma.user.findFirst({ where: { email: `${professorName.toLowerCase().replace(/\s+/g, '.')}}@usthb.dz` } }) : undefined; // Assuming email format
+    const room = roomNumber ? await prisma.room.findFirst({ where: { number: roomNumber } }) : undefined;
+
+    const updatedScheduleSlot = await prisma.scheduleSlot.update({
+      where: { id: parseInt(id) },
+      data: {
+        dayOfWeek: day ? day.toUpperCase() : undefined,
+        startTime: timeSlot ? timeSlot.split(' - ')[0] : undefined,
+        endTime: timeSlot ? (timeSlot.split(' - ')[1] || timeSlot.split(' - ')[0]) : undefined,
+        type: type ? type.toUpperCase() : undefined,
+        group: groups ? groups.join(',') : undefined,
+        ownerId: professor?.id,
+        moduleId: module?.id,
+        roomId: room?.id,
+      },
+      include: { // Include related data in the response
+        module: { select: { code: true, name: true } },
+        owner: { select: { name: true } },
+        room: { select: { number: true, type: true } },
+      }
+    });
+
+    res.json({
+      success: true,
+      scheduleSlot: updatedScheduleSlot
+    });
+
+  } catch (error) {
+    console.error('Error updating section schedule:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update section schedule: ' + error.message
+    });
+  }
+});
+
+// Delete a schedule slot for a section
+router.delete('/schedules/section/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.scheduleSlot.delete({
+      where: { id: parseInt(id) }
+    });
+
+    res.json({
+      success: true,
+      message: 'Section schedule deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Error deleting section schedule:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete section schedule: ' + error.message
+    });
+  }
+});
+
+// Bulk import schedule slots for a section
+router.post('/schedules/section/bulk', async (req, res) => {
+  try {
+    const { specialityName, academicYear, semester, sectionName, scheduleEntries } = req.body;
+
+    console.log('Received bulk import request:', {
+      specialityName,
+      academicYear,
+      semester,
+      sectionName,
+      scheduleEntriesCount: scheduleEntries?.length
+    });
+
+    // Validate required fields
+    if (!specialityName || !academicYear || !semester || !sectionName || !scheduleEntries) {
+      console.log('Missing required fields:', {
+        hasSpeciality: !!specialityName,
+        hasYear: !!academicYear,
+        hasSemester: !!semester,
+        hasSection: !!sectionName,
+        hasEntries: !!scheduleEntries
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Find or create speciality
+    const speciality = await prisma.speciality.findFirst({
+      where: {
+        name: specialityName
+      }
+    });
+
+    if (!speciality) {
+      console.log('Speciality not found:', specialityName);
+      return res.status(404).json({
+        success: false,
+        message: 'Speciality not found'
+      });
+    }
+
+    // Find or create year - ensure academicYear is treated as a string
+    const year = await prisma.year.upsert({
+      where: {
+        name_palierId: {
+          name: String(academicYear),
+          palierId: speciality.palierId
+        }
+      },
+      update: {},
+      create: {
+        name: String(academicYear),
+        description: `Year ${academicYear}`,
+        palierId: speciality.palierId
+      }
+    });
+
+    console.log('Found/created year:', year);
+
+    // Process each schedule entry
+    const results = {
+      total: scheduleEntries.length,
+      created: 0,
+      errors: []
+    };
+
+    for (const entry of scheduleEntries) {
+      try {
+        console.log('Processing entry:', entry);
+
+        // Find or create module
+        const module = await prisma.module.upsert({
+          where: {
+            code: entry.module
+          },
+          update: {},
+          create: {
+            code: entry.module,
+            name: entry.module,
+            specialityId: speciality.id,
+            yearId: year.id,
+            semester: semester
+          }
+        });
+
+        // Find or create section
+        const section = await prisma.section.upsert({
+          where: {
+            name: `${sectionName}-G${entry.groups[0]}`
+          },
+          update: {},
+          create: {
+            name: `${sectionName}-G${entry.groups[0]}`,
+            specialityId: speciality.id,
+            yearId: year.id
+          }
+        });
+
+        // Find or create professor
+        const professor = await prisma.professor.upsert({
+          where: {
+            name: entry.professor
+          },
+          update: {},
+          create: {
+            name: entry.professor,
+            email: `${entry.professor.toLowerCase().replace(/\s+/g, '.')}@univ.dz`
+          }
+        });
+
+        // Find or create room
+        const room = await prisma.room.upsert({
+          where: {
+            number: entry.room
+          },
+          update: {},
+          create: {
+            number: entry.room,
+            type: 'SALLE_COURS',
+            capacity: 30
+          }
+        });
+
+        // Create schedule slot
+        await prisma.scheduleSlot.create({
+          data: {
+            day: entry.day,
+            timeSlot: entry.timeSlot,
+            type: entry.type || 'COURSE',
+            moduleId: module.id,
+            professorId: professor.id,
+            roomId: room.id,
+            sectionId: section.id,
+            semester: semester
+          }
+        });
+
+        results.created++;
+        console.log('Successfully created schedule entry');
+      } catch (error) {
+        console.error('Error processing entry:', error);
+        results.errors.push({
+          entry,
+          error: error.message
+        });
+      }
+    }
+
+    console.log('Bulk import results:', results);
+
+    return res.json({
+      success: true,
+      message: `Successfully imported ${results.created} out of ${results.total} entries`,
+      results
+    });
+  } catch (error) {
+    console.error('Error in bulk import:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to import schedules',
+      error: error.message
+    });
+  }
+});
+
 export default router;
