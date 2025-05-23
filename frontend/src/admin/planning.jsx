@@ -7,10 +7,19 @@ import { Upload, FileText, FileSpreadsheet, Calendar, Check, AlertCircle, Plus, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/ui/dialog"
 import { useState, useRef, useEffect } from "react"
-import axios from 'axios';
+import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
 
 export default function Planning() {
+  // State for form fields
+  const [formData, setFormData] = useState({
+    semester: '',
+    year: '',
+    speciality: '',
+    section: '',
+    fileType: 'docx'
+  });
+
   // State for classrooms
   const [classrooms, setClassrooms] = useState([
     {
@@ -42,6 +51,13 @@ export default function Planning() {
     }
   ]);
 
+  // State for specialities
+  const [specialities, setSpecialities] = useState([]);
+  const [filteredSpecialities, setFilteredSpecialities] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [specialityFile, setSpecialityFile] = useState(null);
+  const [isUploadingSpecialities, setIsUploadingSpecialities] = useState(false);
+
   // State for new/edit classroom form
   const [newClassroom, setNewClassroom] = useState({
     number: "",
@@ -56,7 +72,7 @@ export default function Planning() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedClassroom, setSelectedClassroom] = useState(null);
 
-  // New states for schedules
+  // State for schedules
   const [schedules, setSchedules] = useState([
     {
       id: 1,
@@ -77,6 +93,8 @@ export default function Planning() {
       section: "B"
     }
   ]);
+
+  // State for schedule management
   const [newSchedule, setNewSchedule] = useState({
     module: "",
     professor: "",
@@ -90,7 +108,7 @@ export default function Planning() {
   const [isDeleteScheduleDialogOpen, setIsDeleteScheduleDialogOpen] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
 
-  // New states for modules
+  // State for modules
   const [modules, setModules] = useState([
     {
       id: 1,
@@ -111,6 +129,8 @@ export default function Planning() {
       palier: "LMD"
     }
   ]);
+
+  // State for module management
   const [newModule, setNewModule] = useState({
     code: "",
     name: "",
@@ -124,53 +144,102 @@ export default function Planning() {
   const [isDeleteModuleDialogOpen, setIsDeleteModuleDialogOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState(null);
 
-  // Add new state for file upload
+  // State for file upload
   const [selectedFile, setSelectedFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Add new state for specialities
-  const [specialities, setSpecialities] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [specialityFile, setSpecialityFile] = useState(null);
-  const [isUploadingSpecialities, setIsUploadingSpecialities] = useState(false);
+  // State for validation
+  const [formErrors, setFormErrors] = useState({});
 
-  // Add useEffect to fetch specialities
+  // Fetch specialities on component mount
   useEffect(() => {
     const fetchSpecialities = async () => {
       try {
-        const response = await axios.get('/api/admin/specialities', {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.error('No authentication token found');
+          toast.error('Please log in to access this feature');
+          return;
+        }
+
+        const response = await api.get('/admin/specialities', {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
-          },
-          withCredentials: true
+          }
         });
+
         if (response.data.success) {
+          console.log('All specialities:', response.data.specialities);
           setSpecialities(response.data.specialities);
+          setFilteredSpecialities(response.data.specialities);
+        } else {
+          console.error('Failed to fetch specialities:', response.data.message);
+          toast.error(response.data.message || 'Failed to load specialities');
         }
       } catch (error) {
         console.error('Error fetching specialities:', error);
-        toast.error('Failed to load specialities');
+        if (error.response?.status === 401) {
+          toast.error('Your session has expired. Please log in again.');
+          // Redirect to login page
+          window.location.href = '/login';
+        } else {
+          toast.error('Failed to load specialities. Please try again later.');
+        }
+        setSpecialities([]);
+        setFilteredSpecialities([]);
       }
     };
-
     fetchSpecialities();
   }, []);
 
-  // Add new state for form fields
-  const [formData, setFormData] = useState({
-    semester: '',
-    year: '',
-    speciality: '',
-    section: '',
-    fileType: 'docx'
-  });
-
-  // Add validation state
-  const [formErrors, setFormErrors] = useState({});
+  useEffect(() => {
+    if (formData.year) {
+      const yearNumber = parseInt(formData.year);
+      console.log('Filtering for year:', yearNumber);
+  
+      // Step 1: Filter specialties
+      const filtered = specialities.filter(speciality => {
+        const name = speciality.name.toUpperCase().replace(/ /g, ''); // Normalize name
+        let targetCodes = [];
+  
+        // Years 1-3: Match L1/L2/L3, Licence1/Licence2/Licence3, or ING1/ING2/ING3
+        if (yearNumber >= 1 && yearNumber <= 3) {
+          targetCodes.push(
+            `L${yearNumber}`, 
+            `LICENCE${yearNumber}`, // Matches "Licence1", "Licence2", etc.
+            `ING${yearNumber}`
+          );
+        } 
+        // Years 4-5: Match M1/M2
+        else if (yearNumber === 4 || yearNumber === 5) {
+          const masterYear = yearNumber - 3; // 4 → M1, 5 → M2
+          targetCodes.push(`M${masterYear}`);
+        }
+  
+        // Check for matches
+        return targetCodes.some(code => name.includes(code));
+      });
+  
+      // Step 2: Deduplicate specialties by name (e.g., SIGL L2)
+      const uniqueNames = new Set();
+      const dedupedFiltered = filtered.filter(speciality => {
+        if (!uniqueNames.has(speciality.name)) {
+          uniqueNames.add(speciality.name);
+          return true;
+        }
+        return false;
+      });
+  
+      console.log('Filtered specialties:', dedupedFiltered);
+      setFilteredSpecialities(dedupedFiltered);
+    } else {
+      setFilteredSpecialities(specialities);
+    }
+  }, [formData.year, specialities]);
 
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -285,21 +354,56 @@ export default function Planning() {
     setIsDeleteModuleDialogOpen(false);
   };
 
-  // Update file upload handler to only store the file
+  // Update file upload handler to handle both DOCX and PDF files
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
-      setSelectedFile(file);
-      setError(null);
-      
-      // Validate file type
-      if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        setError('Please upload a .docx file');
+      console.log('Selected file details:', {
+        name: file.name,
+        type: file.type,
+        size: file.size
+      });
+
+      // Check file extension
+      const fileExtension = file.name.split('.').pop().toLowerCase();
+      if (!['docx', 'pdf'].includes(fileExtension)) {
+        setError('Please upload a .docx or .pdf file');
         setSelectedFile(null);
         return;
       }
+
+      // Update formData with the correct file type
+      setFormData(prev => ({
+        ...prev,
+        fileType: fileExtension
+      }));
+
+      // Check MIME type
+      const validMimeTypes = {
+        'docx': [
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/msword',
+          'application/octet-stream'
+        ],
+        'pdf': ['application/pdf']
+      };
+
+      if (!validMimeTypes[fileExtension].includes(file.type)) {
+        console.warn('File MIME type:', file.type);
+        // Don't reject the file just based on MIME type as it can be unreliable
+      }
+
+      setSelectedFile(file);
+      setError(null);
     }
   };
+
+  // Update file input accept attribute based on selected file type
+  useEffect(() => {
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = `.${formData.fileType}`;
+    }
+  }, [formData.fileType]);
 
   // Add form field change handler
   const handleFormChange = (field, value) => {
@@ -329,7 +433,7 @@ export default function Planning() {
     return Object.keys(errors).length === 0;
   };
 
-  // Update handleProcessFile to include auth headers
+  // Update handleProcessFile to include file type
   const handleProcessFile = async () => {
     if (!validateForm()) {
       setError('Please fill in all required fields');
@@ -342,19 +446,25 @@ export default function Planning() {
     formDataToSend.append('year', formData.year);
     formDataToSend.append('speciality', formData.speciality);
     formDataToSend.append('section', formData.section);
+    formDataToSend.append('fileType', formData.fileType);
 
     try {
       setIsProcessing(true);
-      const response = await axios.post('/api/admin/extract-schedule', formDataToSend, {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to access this feature');
+        return;
+      }
+
+      const response = await api.post('/admin/extract-schedule', formDataToSend, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'Content-Type': 'multipart/form-data',
-        },
-        withCredentials: true
+          'Authorization': `Bearer ${token}`
+        }
       });
       
       if (response.data.success) {
-        setExtractedData(response.data.data.scheduleEntries);
+        setExtractedData(response.data.data);
         toast.success('Schedule processed successfully');
         const tabsList = document.querySelector('[role="tablist"]');
         const previewTab = tabsList?.querySelector('[value="preview"]');
@@ -362,11 +472,15 @@ export default function Planning() {
           previewTab.click();
         }
       } else {
-        setError(response.data.error || 'Error processing file');
+        const errorMsg = response.data.message || 'Error processing file';
+        setError(errorMsg);
+        toast.error(errorMsg);
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Error processing file');
       console.error('Error uploading file:', err);
+      const errorMessage = err.response?.data?.message || 'Error processing file';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -383,14 +497,13 @@ export default function Planning() {
 
     try {
       setIsProcessing(true);
-      const response = await axios.post('/api/planning/import-schedule', {
+      const response = await api.post('/api/planning/import-schedule', {
         scheduleData: extractedData
       }, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'Content-Type': 'application/json'
-        },
-        withCredentials: true
+        }
       });
       
       if (response.data.success) {
@@ -418,23 +531,21 @@ export default function Planning() {
 
     try {
       setIsUploadingSpecialities(true);
-      const response = await axios.post('/api/admin/import-specialities', formData, {
+      const response = await api.post('/api/admin/import-specialities', formData, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'multipart/form-data',
-        },
-        withCredentials: true
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
       if (response.data.success) {
         toast.success('Specialities imported successfully');
         // Refresh specialities list
-        const specialitiesResponse = await axios.get('/api/admin/specialities', {
+        const specialitiesResponse = await api.get('/api/admin/specialities', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`,
             'Content-Type': 'application/json'
-          },
-          withCredentials: true
+          }
         });
         if (specialitiesResponse.data.success) {
           setSpecialities(specialitiesResponse.data.specialities);
@@ -528,7 +639,7 @@ export default function Planning() {
                         <SelectValue placeholder="Select speciality" />
                       </SelectTrigger>
                       <SelectContent>
-                        {specialities.map((speciality) => (
+                        {filteredSpecialities.map((speciality) => (
                           <SelectItem key={speciality.id} value={speciality.name}>
                             {speciality.name}
                           </SelectItem>
@@ -561,12 +672,16 @@ export default function Planning() {
                   </div>
                   <div>
                     <Label htmlFor="file-type">File Type</Label>
-                    <Select defaultValue="docx">
+                    <Select 
+                      value={formData.fileType}
+                      onValueChange={(value) => handleFormChange('fileType', value)}
+                    >
                       <SelectTrigger id="file-type" className="w-full">
                         <SelectValue placeholder="Select file type" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="docx">Word Document</SelectItem>
+                        <SelectItem value="pdf">PDF Document</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -582,12 +697,15 @@ export default function Planning() {
                     <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 flex items-center">
                       <FileText className="h-3 w-3 mr-1" /> DOCX
                     </div>
+                    <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 flex items-center">
+                      <FileText className="h-3 w-3 mr-1" /> PDF
+                    </div>
                   </div>
                   <input
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileUpload}
-                    accept=".docx"
+                    accept=".docx,.pdf"
                     className="hidden"
                     disabled={!formData.semester || !formData.year || !formData.speciality || !formData.section}
                   />
@@ -968,7 +1086,7 @@ export default function Planning() {
                               value={newSchedule.section}
                               onValueChange={(value) => setNewSchedule(prev => ({ ...prev, section: value }))}
                             >
-                              <SelectTrigger className="col-span-3 w-full">
+                              <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select section" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1511,7 +1629,7 @@ export default function Planning() {
                           </tr>
                         </thead>
                         <tbody>
-                          {extractedData.map((entry, index) => (
+                          {extractedData?.data?.scheduleEntries?.map((entry, index) => (
                             <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
                               <td className="px-4 py-3">{entry.modules[0]}</td>
                               <td className="px-4 py-3">{entry.professors[0]}</td>
@@ -1715,3 +1833,4 @@ export default function Planning() {
     </div>
   )
 }
+  

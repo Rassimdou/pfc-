@@ -78,7 +78,7 @@ export default function UserLayout() {
       >
         <div className="mb-8 flex items-center gap-2 px-2">
           <ShieldCheck className="h-7 w-7 text-emerald-600" />
-          <span className="text-xl font-bold text-emerald-700">User Panel</span>
+          <span className="text-xl font-bold text-emerald-700">USTHB-Xchange</span>
         </div>
         <nav className="flex flex-col gap-2">
           {navLinks.map(link => (

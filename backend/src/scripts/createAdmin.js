@@ -13,6 +13,7 @@ const createAdmin = async () => {
         password: hashedPassword,
         firstName: 'Admin',
         lastName: 'User',
+        name: 'Admin User',
         isVerified: true
       },
       create: {
@@ -20,6 +21,7 @@ const createAdmin = async () => {
         password: hashedPassword,
         firstName: 'Admin',
         lastName: 'User',
+        name: 'Admin User',
         role: 'ADMIN',
         isVerified: true
       }

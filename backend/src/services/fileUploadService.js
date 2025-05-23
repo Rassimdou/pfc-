@@ -1,3 +1,4 @@
+// fileUploadService.js
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -33,22 +34,25 @@ const storage = multer.diskStorage({
 
 // File filter configuration
 const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = {
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true, // .docx
-    'application/vnd.ms-excel': true, // .xls
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': true // .xlsx
-  };
+  // Check file extension
+  const fileExtension = path.extname(file.originalname).toLowerCase();
+  const validMimeTypes = [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'application/octet-stream',
+    'application/pdf'
+  ];
 
-  const allowedExtensions = ['.docx', '.xls', '.xlsx'];
+  console.log('File upload details:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    extension: fileExtension
+  });
 
-  const ext = path.extname(file.originalname).toLowerCase();
-  const isValidMimeType = allowedMimeTypes[file.mimetype];
-  const isValidExtension = allowedExtensions.includes(ext);
-
-  if (isValidMimeType && isValidExtension) {
+  if ((fileExtension === '.docx' || fileExtension === '.pdf') && validMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type. Allowed types: ${allowedExtensions.join(', ')}`));
+    cb(new Error('Only Microsoft Word (.docx) and PDF (.pdf) files are allowed'));
   }
 };
 
@@ -57,7 +61,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 5 * 1024 * 1024, // 5MB limit
     files: 1 // Only allow one file at a time
   }
 });
@@ -68,7 +72,7 @@ const handleUploadError = (error, req, res, next) => {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: 'File size too large. Maximum size is 10MB'
+        message: 'File size too large. Maximum size is 5MB'
       });
     }
     return res.status(400).json({

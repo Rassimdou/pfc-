@@ -37,7 +37,7 @@ export default function AdminSettings() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="system-name">System Name</Label>
-                  <Input id="system-name" defaultValue="UniSwap - Professor Hour Exchange" />
+                  <Input id="system-name" defaultValue="USTHB-Xchange" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="university-name">University Name</Label>

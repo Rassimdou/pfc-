@@ -148,7 +148,7 @@ export default function AdminLayout() {
               <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
             </svg>
-            <span className="text-xl font-bold">UniSwap Admin</span>
+            <span className="text-xl font-bold">USTHB-Xchange</span>
           </Link>
         </div>
         <div className="flex flex-col justify-between h-[calc(100%-4rem)]">

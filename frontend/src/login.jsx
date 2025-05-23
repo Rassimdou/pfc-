@@ -111,12 +111,12 @@ export default function Login() {
       <div className="flex flex-1 flex-col justify-center items-center p-4 md:p-8">
         <Link to="/" className="mb-8 flex items-center gap-2">
           <BookOpen className="h-8 w-8 text-emerald-600" />
-          <span className="text-2xl font-bold">UniSwap</span>
+          <span className="text-2xl font-bold">USTHB-Xchange</span>
         </Link>
 
         <form onSubmit={handleSubmit} className="mx-auto w-full max-w-md space-y-6 rounded-xl border bg-white p-6 shadow-lg animate-fadeIn">
           <div className="space-y-2 text-center">
-            <h1 className="text-3xl font-bold">Welcome back</h1>
+            <h1 className="text-3xl font-bold">Welcome to USTHB-Xchange</h1>
             <p className="text-gray-500">Enter your credentials to access your account</p>
           </div>
 

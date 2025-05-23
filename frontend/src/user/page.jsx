@@ -168,7 +168,7 @@ export default function Dashboard() {
       <main className="flex-1 bg-gray-50">
         <div className="container py-6 px-4">
           <div className="mb-6">
-            <h1 className="text-2xl font-bold">Welcome back, {user?.firstName}</h1>
+            <h1 className="text-2xl font-bold">Welcome to USTHB-Xchange, {user?.firstName}</h1>
             <p className="text-gray-500">Here's what's happening with your teaching schedule</p>
           </div>
 

@@ -20,25 +20,46 @@ import xlsx from 'xlsx';
 import { isAuthenticated, isAdmin } from '../middleware/auth.js';
 import { upload, handleUploadError } from '../services/fileUploadService.js';
 import FileProcessingService from '../services/fileProcessingService.js';
+import ScheduleParser from '../utils/scheduleParser.js';
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
-// Ensure upload directory exists
-const uploadDir = 'uploads/surveillance';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Ensure upload directories exist
+const uploadDirs = {
+  surveillance: 'uploads/surveillance',
+  schedules: 'uploads/schedules'
+};
+
+Object.values(uploadDirs).forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
 
 // Multer configuration for file uploads
 const uploadMulter = multer({
-  dest: uploadDir,
+  dest: uploadDirs.surveillance,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
-        /\.docx$/.test(file.originalname)) {
+    // Check file extension
+    const fileExtension = path.extname(file.originalname).toLowerCase();
+    const validMimeTypes = [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'application/octet-stream',
+      'application/pdf'
+    ];
+
+    console.log('File upload details:', {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      extension: fileExtension
+    });
+
+    if (fileExtension === '.docx' || fileExtension === '.pdf' || validMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only Microsoft Word (.docx) files are allowed'));
+      cb(new Error('Only Microsoft Word (.docx) and PDF (.pdf) files are allowed'));
     }
   },
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
@@ -450,71 +471,44 @@ router.get('/modules', authenticate, async (req, res) => {
   }
 });
 
-// Route to handle schedule file upload and processing
-router.post('/extract-schedule', 
-  isAuthenticated, 
-  isAdmin,
-  uploadMulter.single('file'),
-  handleUploadError,
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ 
-          success: false,
-          message: 'No file uploaded' 
-        });
-      }
-
-      // Extract form data
-      const { semester, year, speciality, section } = req.body;
-
-      // Process the file based on its type
-      const fileType = FileProcessingService.getFileType(req.file.path);
-      let scheduleData;
-
-      if (fileType === 'docx') {
-        const result = await FileProcessingService.processDocxFile(req.file.path);
-        scheduleData = extractScheduleData(result.htmlContent);
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: 'Only .docx files are supported for schedule uploads'
-        });
-      }
-
-      // Add form data to schedule data
-      scheduleData.headerInfo = {
-        ...scheduleData.headerInfo,
-        semester,
-        year,
-        speciality,
-        section
-      };
-
-      // Import schedule to database
-      const importResult = await importScheduleToDatabase(scheduleData, year, semester);
-
-      // Create user schedules based on section schedules
-      await createUserSchedules(scheduleData, year, semester);
-
-      // Clean up the uploaded file
-      await FileProcessingService.cleanupFile(req.file.path);
-
-      res.json({
-        success: true,
-        message: 'Schedule processed successfully',
-        data: scheduleData,
-        importResult
-      });
-
-    } catch (error) {
-      console.error('Error processing schedule:', error);
-      res.status(500).json({ 
+// Schedule extraction route
+router.post('/extract-schedule', authenticate, upload.single('file'), handleUploadError, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
         success: false,
-        message: 'Error processing schedule',
-        error: error.message 
+        message: 'No file uploaded'
       });
     }
+
+    console.log('Processing file:', req.file.path);
+    const result = await FileProcessingService.processFile(req.file.path);
+
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+
+    res.json({
+      success: true,
+      data: result.data
+    });
+
+  } catch (error) {
+    console.error('Error processing schedule file:', error);
+    res.status(500).json({
+      success: false,
+      message: `Error processing ${req.file?.mimetype === 'application/pdf' ? 'PDF' : 'DOCX'}: ${error.message}`
+    });
+  } finally {
+    // Clean up the uploaded file
+    if (req.file?.path) {
+      try {
+        await fs.promises.unlink(req.file.path);
+      } catch (error) {
+        console.error('Error cleaning up file:', error);
+      }
+    }
+  }
 });
 
 // Function to create user schedules based on section schedules

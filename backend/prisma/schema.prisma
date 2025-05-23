@@ -75,6 +75,7 @@ model RefreshToken {
 model Palier {
   id          Int          @id @default(autoincrement())
   name        String       @unique
+  years       Year[]       // New relation to Year model
   specialities Speciality[]
   modules     Module[]
   sections    Section[]
@@ -84,16 +85,34 @@ model Palier {
   @@index([name])
 }
 
+model Year {
+  id          Int          @id @default(autoincrement())
+  name        String       // e.g., "First Year", "Second Year"
+  palier      Palier       @relation(fields: [palierId], references: [id])
+  palierId    Int
+  specialities Speciality[]
+  modules     Module[]
+  sections    Section[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([name, palierId])
+  @@index([palierId])
+}
+
 model Speciality {
   id          Int       @id @default(autoincrement())
-  name        String    @unique
+  name        String    
   description String?
   palier      Palier    @relation(fields: [palierId], references: [id])
   palierId    Int
+  year        Year      @relation(fields: [yearId], references: [id])
+  yearId      Int
   modules     Module[]
   professors  User[]
   
-  @@index([name, palierId])
+  @@unique([name, palierId, yearId])
+  @@index([name, palierId, yearId])
 }
 
 model Module {
@@ -104,6 +123,8 @@ model Module {
   academicYear    Int            // Added academic year support
   palier          Palier         @relation(fields: [palierId], references: [id])
   palierId        Int
+  year            Year           @relation(fields: [yearId], references: [id])
+  yearId          Int
   semestre        Semestre
   speciality      Speciality     @relation(fields: [specialityId], references: [id])
   specialityId    Int
@@ -116,6 +137,7 @@ model Module {
 
   @@unique([code, academicYear]) // Prevent duplicate modules per year
   @@index([specialityId, academicYear])
+  @@index([yearId])
 }
 
 enum Semestre {
@@ -233,11 +255,14 @@ model Section {
   academicYear    Int
   palier          Palier?        @relation(fields: [palierId], references: [id])
   palierId        Int?
+  year            Year?          @relation(fields: [yearId], references: [id])
+  yearId          Int?
   module          Module         @relation(fields: [moduleId], references: [id])
   moduleId        Int
   slots           ScheduleSlot[]
 
   @@index([moduleId, academicYear])
+  @@index([yearId])
 }
 
 model PermutationRequest {

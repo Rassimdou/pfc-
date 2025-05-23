@@ -4,128 +4,216 @@ import { convertDayToEnum, extractTimeRange } from './scheduleParser.js';
 
 const prisma = new PrismaClient();
 
-/**
- * Imports schedule data into the database
- * @param {Object} scheduleData - Extracted schedule data
- * @param {string} selectedYear - Selected academic year
- * @param {string} selectedSemester - Selected semester number
- * @returns {Object} Result of the import operation
- */
-export async function importScheduleToDatabase(scheduleData, selectedYear, selectedSemester) {
+export async function importScheduleToDatabase(scheduleData, year, semester) {
+  // Validate input data first
+  if (!scheduleData?.success || !scheduleData.data) {
+    throw new Error('Invalid schedule data: ' + (scheduleData.error || 'Unknown error'));
+  }
+
+  const { headerInfo, timeSlots, scheduleEntries } = scheduleData.data;
+  
   try {
-    const { headerInfo, scheduleEntries } = scheduleData;
-    const specialityCode = headerInfo.speciality || 'ING.INFO';
-    const sectionLetter = headerInfo.section || 'A';
-    const academicYear = parseInt(selectedYear) || 2024;
-    
-    // Convert semester string to enum value
-    const semesterEnum = selectedSemester === '1' ? 'SEMESTRE1' : 'SEMESTRE2';
-    
-    // 1. Get or create the speciality
-    const speciality = await findOrCreateSpeciality(specialityCode);
-    
-    // 2. Process each schedule entry
-    const createdSlots = [];
-    const processedSlots = [];
-    
+    // Enhanced speciality creation with validation
+    const speciality = await prisma.speciality.upsert({
+      where: { 
+        name_yearId: {
+          name: headerInfo.speciality || 'Unknown Speciality',
+          yearId: (await getCurrentYear()).id
+        }
+      },
+      update: {},
+      create: {
+        name: headerInfo.speciality || 'Unknown Speciality',
+        year: { connect: { id: (await getCurrentYear()).id } },
+        palier: { connect: { name: 'LMD' } }
+      }
+    });
+
+    // Batch processing setup
+    const batchSize = 50;
+    let currentBatch = [];
+    let createdCount = 0;
+
     for (const entry of scheduleEntries) {
-      try {
-        // Convert day string to enum
-        const dayOfWeek = convertDayToEnum(entry.day);
+      const processedEntry = await processScheduleEntry(entry, speciality, year, semester);
+      
+      if (processedEntry) {
+        currentBatch.push(processedEntry);
         
-        // Extract time range from time slot
-        const [startTime, endTime] = extractTimeRange(entry.timeSlot);
-        
-        // Skip if no modules or if already processed identical slot
-        if (entry.modules.length === 0 || 
-            isProcessedSlot(processedSlots, dayOfWeek, startTime, entry.modules[0])) {
-          continue;
+        if (currentBatch.length >= batchSize) {
+          await executeBatch(currentBatch);
+          createdCount += currentBatch.length;
+          currentBatch = [];
         }
-        
-        // For each module mentioned in the entry
-        for (const moduleName of entry.modules) {
-          // Find or create module
-          const module = await findOrCreateModule({
-            name: moduleName,
-            academicYear,
-            semesterEnum,
-            specialityId: speciality.id
-          });
-          
-          // For each professor mentioned in the entry
-          for (const professorName of entry.professors) {
-            // Find or create professor
-            const professor = await findOrCreateProfessor({
-              name: professorName,
-              specialityId: speciality.id
-            });
-            
-            // Connect professor to module if not already connected
-            await connectProfessorToModule(professor.id, module.id);
-            
-            // Process sections and groups
-            // If no explicit groups, use default group "1"
-            const groups = entry.groups.length > 0 ? entry.groups : ['1'];
-            
-            for (const groupNumber of groups) {
-              // Create section name with group information
-              const sectionName = `${sectionLetter}-G${groupNumber}`;
-              
-              // Find or create section
-              const section = await findOrCreateSection({
-                name: sectionName,
-                moduleId: module.id,
-                academicYear
-              });
-              
-              // Process rooms if any
-              let roomId = null;
-              if (entry.rooms.length > 0) {
-                const roomInfo = entry.rooms[0];
-                const room = await findOrCreateRoom({
-                  number: roomInfo.number.toString(),
-                  type: roomInfo.type || getRoomTypeFromEntryType(entry.type)
-                });
-                roomId = room.id;
-              }
-              
-              // Create schedule slot
-              const slotData = {
-                dayOfWeek,
-                startTime,
-                endTime,
-                isAvailable: false,
-                ownerId: professor.id,
-                moduleId: module.id,
-                sectionId: section.id,
-                ...(roomId ? { roomId } : {})
-              };
-              
-              const scheduleSlot = await createScheduleSlot(slotData);
-              
-              createdSlots.push(scheduleSlot);
-              
-              // Track processed slot to avoid duplicates
-              processedSlots.push({
-                day: dayOfWeek,
-                time: startTime,
-                module: moduleName
-              });
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error processing schedule entry:', error);
-        // Continue with next entry even if this one fails
       }
     }
-    
+
+    // Process remaining entries
+    if (currentBatch.length > 0) {
+      await executeBatch(currentBatch);
+      createdCount += currentBatch.length;
+    }
+
     return {
-      createdSlots: createdSlots.length,
-      message: `Successfully imported ${createdSlots.length} schedule slots`
+      success: true,
+      createdCount,
+      totalEntries: scheduleEntries.length
+    };
+
+  } catch (error) {
+    console.error('Database import failed:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// Helper functions
+async function processScheduleEntry(entry, speciality, year, semester) {
+  try {
+    const dayEnum = convertDayToEnum(entry.day);
+    const [startTime, endTime] = extractTimeRange(entry.timeSlot);
+    
+    const section = await prisma.section.upsert({
+      where: { 
+        name_specialityId: {
+          name: entry.section || 'A',
+          specialityId: speciality.id
+        }
+      },
+      update: {},
+      create: {
+        name: entry.section || 'A',
+        specialityId: speciality.id,
+        academicYear: year
+      }
+    });
+
+    const module = await handleModuleCreation(entry, speciality, semester);
+    const professor = await handleProfessorCreation(entry, speciality);
+    const room = await handleRoomCreation(entry);
+
+    return {
+      dayEnum,
+      startTime,
+      endTime,
+      sectionId: section.id,
+      moduleId: module.id,
+      professorId: professor?.id,
+      roomId: room?.id,
+      type: entry.type || 'COURSE',
+      groups: entry.groups
     };
   } catch (error) {
-    console.error('Error importing schedule to database:', error);
-    throw new Error('Failed to import schedule data: ' + error.message);
+    console.error('Entry processing failed:', error);
+    return null;
   }
+}
+
+async function executeBatch(batch) {
+  await prisma.$transaction(
+    batch.map(entry => 
+      prisma.scheduleSlot.upsert({
+        where: {
+          unique_slot: {
+            dayOfWeek: entry.dayEnum,
+            startTime: entry.startTime,
+            sectionId: entry.sectionId,
+            moduleId: entry.moduleId
+          }
+        },
+        create: {
+          dayOfWeek: entry.dayEnum,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+          type: entry.type,
+          group: entry.groups?.join(',') || null,
+          sectionId: entry.sectionId,
+          moduleId: entry.moduleId,
+          professorId: entry.professorId,
+          roomId: entry.roomId
+        },
+        update: {
+          endTime: entry.endTime,
+          type: entry.type,
+          group: entry.groups?.join(',') || null,
+          professorId: entry.professorId,
+          roomId: entry.roomId
+        }
+      })
+    )
+  );
+}
+
+async function handleModuleCreation(entry, speciality, semester) {
+  return prisma.module.upsert({
+    where: {
+      name_specialityId_semestre: {
+        name: entry.modules[0] || 'Unknown Module',
+        specialityId: speciality.id,
+        semestre: semester
+      }
+    },
+    update: {},
+    create: {
+      name: entry.modules[0] || 'Unknown Module',
+      code: generateModuleCode(entry.modules[0]),
+      specialityId: speciality.id,
+      semestre: semester,
+      academicYear: speciality.yearId
+    }
+  });
+}
+
+function generateModuleCode(moduleName) {
+  return moduleName
+    ? moduleName.slice(0, 3).toUpperCase() + Math.floor(100 + Math.random() * 900)
+    : 'MOD' + Math.floor(1000 + Math.random() * 9000);
+}
+
+async function handleProfessorCreation(entry, speciality) {
+  if (!entry.professors?.length) return null;
+  
+  return prisma.user.upsert({
+    where: { email: generateProfessorEmail(entry.professors[0]) },
+    update: {},
+    create: {
+      name: entry.professors[0],
+      email: generateProfessorEmail(entry.professors[0]),
+      role: 'PROFESSOR',
+      specialitiesTaught: { connect: { id: speciality.id } }
+    }
+  });
+}
+
+function generateProfessorEmail(name) {
+  return `${name.toLowerCase().replace(/\s+/g, '.')}@usthb.dz`;
+}
+
+async function handleRoomCreation(entry) {
+  if (!entry.rooms?.length) return null;
+  
+  return prisma.room.upsert({
+    where: { number: entry.rooms[0].number },
+    update: { type: entry.rooms[0].type },
+    create: {
+      number: entry.rooms[0].number,
+      type: entry.rooms[0].type || 'SALLE_COURS',
+      capacity: 30
+    }
+  });
+}
+
+async function getCurrentYear() {
+  return prisma.year.upsert({
+    where: { name: new Date().getFullYear().toString() },
+    update: {},
+    create: {
+      name: new Date().getFullYear().toString(),
+      palier: { connect: { name: 'LMD' } }
+    }
+  });
 }
