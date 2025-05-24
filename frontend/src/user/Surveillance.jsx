@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { Label } from '@/ui/label';
+import { Checkbox } from "@/ui/checkbox";
 
 export default function Surveillance() {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ export default function Surveillance() {
   const [desiredTime, setDesiredTime] = useState('');
   const [potentialMatches, setPotentialMatches] = useState([]);
   const [searchingMatches, setSearchingMatches] = useState(false);
-  const [selectedPotentialMatchId, setSelectedPotentialMatchId] = useState(null);
+  const [selectedPotentialMatchIds, setSelectedPotentialMatchIds] = useState([]);
   const [pendingSwaps, setPendingSwaps] = useState([]);
 
   useEffect(() => {
@@ -32,7 +33,7 @@ export default function Surveillance() {
 
   const fetchAssignments = async () => {
     try {
-      const response = await api.get('/surveillance/assignments');
+      const response = await api.get('/api/surveillance/assignments');
       if (response.data.success) {
         setAssignments(response.data.assignments || []);
         // Filter assignments that are pending swaps
@@ -68,10 +69,10 @@ export default function Surveillance() {
 
     setSearchingMatches(true);
     setPotentialMatches([]);
-    setSelectedPotentialMatchId(null);
+    setSelectedPotentialMatchIds([]);
 
     try {
-      const response = await api.post('/swap/request-criteria', {
+      const response = await api.post('/api/swap/request-criteria', {
         assignmentId: selectedAssignment.id,
         desiredDate,
         desiredTime,
@@ -79,6 +80,7 @@ export default function Surveillance() {
 
       if (response.data.success) {
         setPotentialMatches(response.data.potentialMatches || []);
+        console.log('Potential swap matches received:', response.data.potentialMatches);
         if (response.data.potentialMatches.length === 0) {
           toast('No swappable assignments found matching your criteria.');
         } else {
@@ -96,23 +98,23 @@ export default function Surveillance() {
   };
 
   const handleInitiateAnonymousSwapRequest = async () => {
-    if (!selectedAssignment || !selectedPotentialMatchId) {
-       toast.error('Please select your assignment and a target assignment from the list.');
+    if (!selectedAssignment || selectedPotentialMatchIds.length === 0) {
+       toast.error('Please select your assignment and at least one target assignment from the list.');
        return;
     }
 
     try {
       // --- Implement logic to initiate anonymous swap request ---
       // Call backend endpoint POST /api/swap/initiate-anonymous-request
-      const response = await api.post('/swap/initiate-anonymous-request', {
+      const response = await api.post('/api/swap/initiate-anonymous-request', {
         fromAssignmentId: selectedAssignment.id,
-        toAssignmentId: selectedPotentialMatchId,
+        toAssignmentIds: selectedPotentialMatchIds,
       });
 
       if (response.data.success) {
-        toast.success('Anonymous swap request sent successfully!');
+        toast.success('Anonymous swap request(s) sent successfully!');
         setShowSwapDialog(false); // Close the dialog
-        setSelectedPotentialMatchId(null); // Clear selected match
+        setSelectedPotentialMatchIds([]); // Clear selected IDs
         // Optionally refresh assignments to show pending status
         fetchAssignments();
       } else {
@@ -127,31 +129,9 @@ export default function Surveillance() {
 
   };
 
-  const handleAcceptSwap = async (swapId) => {
-    try {
-      await api.post(`/surveillance/swap/${swapId}/accept`);
-      toast.success('Swap request accepted');
-      fetchAssignments();
-    } catch (error) {
-      console.error('Error accepting swap:', error);
-      toast.error(error.response?.data?.message || 'Failed to accept swap request');
-    }
-  };
-
-  const handleDeclineSwap = async (swapId) => {
-    try {
-      await api.post(`/surveillance/swap/${swapId}/decline`);
-      toast.success('Swap request declined');
-      fetchAssignments();
-    } catch (error) {
-      console.error('Error declining swap:', error);
-      toast.error(error.response?.data?.message || 'Failed to decline swap request');
-    }
-  };
-
   const handleCancelSwap = async (swapId) => {
     try {
-      await api.post(`/surveillance/swap/${swapId}/cancel`);
+      await api.post(`/api/surveillance/swap/${swapId}/cancel`);
       toast.success('Swap request cancelled');
       fetchAssignments();
     } catch (error) {
@@ -177,6 +157,22 @@ export default function Surveillance() {
     return matchesSearch;
   });
 
+  const handleSelectAllMatches = (isChecked) => {
+    if (isChecked) {
+      setSelectedPotentialMatchIds(potentialMatches.map(match => match.id));
+    } else {
+      setSelectedPotentialMatchIds([]);
+    }
+  };
+
+  const handleToggleMatchSelect = (matchId) => {
+    setSelectedPotentialMatchIds(prevSelected =>
+      prevSelected.includes(matchId)
+        ? prevSelected.filter(id => id !== matchId)
+        : [...prevSelected, matchId]
+    );
+  };
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {pendingSwaps.length > 0 && (
@@ -201,19 +197,11 @@ export default function Surveillance() {
                   <div className="flex gap-2">
                     <Button
                       size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700"
-                      onClick={() => handleAcceptSwap(swap.swapRequest.id)}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Accept
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDeclineSwap(swap.swapRequest.id)}
+                      variant="destructive"
+                      onClick={() => handleCancelSwap(swap.swapRequest.id)}
                     >
                       <XCircle className="h-4 w-4 mr-1" />
-                      Decline
+                      Cancel Request
                     </Button>
                   </div>
                 </div>
@@ -249,6 +237,10 @@ export default function Surveillance() {
               />
               Show only swappable assignments
             </label>
+            <Button onClick={fetchAssignments} variant="outline" size="sm">
+              <Loader2 className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
           </div>
 
           <div className="rounded-md border">
@@ -310,7 +302,7 @@ export default function Surveillance() {
                           )}
                         </td>
                         <td className="px-4 py-2">
-                          {!assignment.isResponsible && assignment.canSwap && !assignment.swapRequest && (
+                          {!assignment.isResponsible && assignment.canSwap && (!assignment.swapRequest || assignment.swapRequest.status !== 'PENDING') && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -401,29 +393,48 @@ export default function Surveillance() {
                <div className="space-y-2">
                  <Label className="text-sm font-medium">Potential Swap Targets ({potentialMatches.length})</Label>
                  <div className="border rounded-lg max-h-40 overflow-y-auto">
+                   {/* Select All Checkbox */}
+                   <div className="flex items-center p-2 border-b bg-gray-100">
+                      <Checkbox
+                        id="selectAllMatches"
+                        checked={selectedPotentialMatchIds.length === potentialMatches.length}
+                        onCheckedChange={handleSelectAllMatches}
+                      />
+                      <Label htmlFor="selectAllMatches" className="ml-2 font-medium cursor-pointer">Select All</Label>
+                   </div>
+                   
                    {potentialMatches.map(match => (
                      <div
                        key={match.id}
-                       className={`flex items-center justify-between p-2 border-b last:border-b-0 cursor-pointer ${selectedPotentialMatchId === match.id ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}
-                       onClick={() => setSelectedPotentialMatchId(match.id)}
+                       className={`flex items-center justify-between p-2 border-b last:border-b-0 cursor-pointer ${selectedPotentialMatchIds.includes(match.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}
+                       onClick={() => handleToggleMatchSelect(match.id)}
                      >
-                        <div className="flex-1">
-                           <div className="font-medium">{match.module} - {match.room}</div>
-                           <div className="text-sm text-gray-500">
-                              {new Date(match.date).toLocaleDateString()} at {match.time}
-                           </div>
-                           {/* Show sender's assignment details */}
-                           <div className="mt-2 text-sm text-gray-600">
-                              <div className="font-medium text-emerald-600">You will receive:</div>
-                              <div>{match.senderAssignment.module} - {match.senderAssignment.room}</div>
-                              <div className="text-gray-500">
+                       <div className="flex items-center">
+                         <Checkbox
+                           id={`match-${match.id}`}
+                           checked={selectedPotentialMatchIds.includes(match.id)}
+                           onCheckedChange={() => handleToggleMatchSelect(match.id)}
+                         />
+                         <label htmlFor={`match-${match.id}`} className="ml-2 cursor-pointer flex-1">
+                           <div className="flex-1">
+                             <div className="font-medium">{match.module} - {match.room}</div>
+                             <div className="text-sm text-gray-500">
+                               {new Date(match.date).toLocaleDateString()} at {match.time}
+                             </div>
+                             {/* Show sender's assignment details */}
+                             <div className="mt-2 text-sm text-gray-600">
+                               <div className="font-medium text-emerald-600">You will receive:</div>
+                               <div>{match.senderAssignment.module} - {match.senderAssignment.room}</div>
+                               <div className="text-gray-500">
                                  {new Date(match.senderAssignment.date).toLocaleDateString()} at {match.senderAssignment.time}
-                              </div>
+                               </div>
+                             </div>
                            </div>
-                        </div>
-                        {selectedPotentialMatchId === match.id && (
-                            <CheckCircle className="h-5 w-5 text-emerald-600 ml-4" />
-                        )}
+                         </label>
+                       </div>
+                       {selectedPotentialMatchIds.includes(match.id) && (
+                           <CheckCircle className="h-5 w-5 text-emerald-600 ml-4" />
+                       )}
                      </div>
                    ))}
                  </div>
@@ -443,9 +454,9 @@ export default function Surveillance() {
             <Button 
               className="bg-emerald-600 hover:bg-emerald-700"
               onClick={handleInitiateAnonymousSwapRequest}
-              disabled={!selectedPotentialMatchId}
+              disabled={selectedPotentialMatchIds.length === 0}
             >
-              Send Swap Request
+              Send Swap Request{selectedPotentialMatchIds.length > 0 && ` (${selectedPotentialMatchIds.length})`}
             </Button>
           </DialogFooter>
         </DialogContent>

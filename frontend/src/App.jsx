@@ -12,10 +12,12 @@ import AdminProfile from './admin/profile';
 import AdminSettings from './admin/setting';
 import AdminDashboard from './admin/page';
 import EmailVerification from './EmailVerification.jsx';
-import Surveillance from './user/Surveillance';
+import Surveillance from './user/surveillance.jsx';
 import SurveillanceManagement from './admin/surveillance';
 import ExchangeHistory from './admin/exchanges';
 import { Toaster } from 'react-hot-toast';
+import Profile from './user/Profile';
+import ReceivedSwapRequestsPage from './user/ReceivedSwapRequestsPage';
 
 
 
@@ -39,6 +41,8 @@ function App() {
           <Route index element={<Navigate to="/user/page" replace />} />
           <Route path="page" element={<Dashboard />} />
           <Route path="surveillance" element={<Surveillance />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="swap-requests" element={<ReceivedSwapRequestsPage />} />
         </Route>
         
         {/* Admin routes */}

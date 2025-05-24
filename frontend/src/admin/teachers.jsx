@@ -58,7 +58,7 @@ export default function TeachersManagement() {
   const fetchTeachers = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/admin/teachers');
+      const response = await api.get('/api/admin/teachers');
       // Filter out pending teachers that are already active
       const teachers = response.data.data || [];
       const filteredTeachers = teachers.filter(teacher => {
@@ -92,7 +92,7 @@ export default function TeachersManagement() {
         return;
       }
 
-      const response = await api.post('/admin/teachers', newTeacher);
+      const response = await api.post('/api/admin/teachers', newTeacher);
 
       if (response.data.success) {
         toast.success('Invitation sent successfully');
@@ -128,7 +128,7 @@ export default function TeachersManagement() {
     if (window.confirm('Are you sure you want to delete this teacher?')) {
       try {
         console.log('Attempting to delete teacher:', { id, type });
-        const response = await api.delete(`/admin/teachers/${id}?type=${type}`);
+        const response = await api.delete(`/api/admin/teachers/${id}?type=${type}`);
         if (response.data.success) {
           toast.success('Teacher deleted successfully');
           fetchTeachers();
@@ -162,7 +162,7 @@ export default function TeachersManagement() {
   const handleResendInvitation = async (email) => {
     try {
       setResendingInvitation(true);
-      const response = await api.post('/admin/teachers/resend-invitation', { email });
+      const response = await api.post('/api/admin/teachers/resend-invitation', { email });
 
       if (response.data.success) {
         toast.success('Invitation resent successfully');
