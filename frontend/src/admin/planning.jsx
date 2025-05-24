@@ -215,7 +215,7 @@ export default function Planning() {
           return;
         }
 
-        const response = await api.get('/api/admin/specialities', {
+        const response = await api.get('/admin/specialities', {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -784,7 +784,7 @@ export default function Planning() {
       if (response.data.success) {
         toast.success('Specialities imported successfully');
         // Refresh specialities list
-        const specialitiesResponse = await api.get('/api/admin/specialities', {
+        const specialitiesResponse = await api.get('/admin/specialities', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`,
             'Content-Type': 'application/json'

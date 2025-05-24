@@ -74,298 +74,120 @@ router.delete('/teachers/:id', authenticate, deleteTeacher);
 router.delete('/pending-teachers/:id', authenticate, deletePendingTeacher);
 
 // Admin surveillance upload
-router.post('/surveillance/upload', authenticate, uploadMulter.single('file'), handleUploadError, async (req, res) => {
+router.post('/surveillance/upload', authenticate, uploadMulter.single('file'), async (req, res) => {
   try {
-    console.log('Received file upload request:', {
-      body: req.body,
-      file: req.file ? {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        path: req.file.path
-      } : null
-    });
-
-    const { teacherId } = req.body;
+    const { teacherId, date, time, module, room, isResponsible } = req.body;
     const file = req.file;
 
-    if (!teacherId || !file) {
-      console.log('Missing required fields:', { teacherId, hasFile: !!file });
+    if (!teacherId || !date || !time || !module || !room) {
       return res.status(400).json({
         success: false,
-        message: 'Teacher ID and file are required'
+        message: 'All fields are required'
       });
     }
 
-    // Verify the teacher exists
+    // Verify the teacher exists and get their modules
     const teacher = await prisma.user.findUnique({
-      where: { id: parseInt(teacherId) }
+      where: { id: parseInt(teacherId) },
+      include: { taughtModules: true }
     });
 
     if (!teacher) {
-      console.log('Teacher not found:', { teacherId });
       return res.status(404).json({
         success: false,
         message: 'Teacher not found'
       });
     }
 
-    console.log('Found teacher:', { id: teacher.id, name: teacher.name });
-
-    // Save file metadata
-    const surveillanceFile = await prisma.surveillanceFile.create({
-      data: {
-        userId: parseInt(teacherId),
-        originalName: file.originalname,
-        path: file.path,
-        uploadedAt: new Date(),
-        hash: file.filename // Using the generated filename as the hash
+    // Find the module
+    const moduleRecord = await prisma.module.findFirst({
+      where: {
+        OR: [
+          { code: module },
+          { name: module }
+        ]
       }
     });
 
-    console.log('Created surveillance file record:', { id: surveillanceFile.id });
-
-    // Process the file to extract assignments
-    try {
-      let text = '';
-      const fileExtension = path.extname(file.originalname).toLowerCase();
-
-      console.log('Processing file:', { 
-        extension: fileExtension,
-        path: file.path,
-        exists: fs.existsSync(file.path)
-      });
-
-      if (fileExtension === '.docx') {
-        const result = await mammoth.extractRawText({ path: file.path });
-        text = result.value;
-        console.log('Raw extracted text:', text);
-      } else if (fileExtension === '.pdf') {
-        // For now, return a simple assignment for PDF files
-        text = `2024-03-20|09:00|Default Module|Room 101`;
-        console.log('Created default text for PDF');
-      } else {
-        throw new Error(`Unsupported file format: ${fileExtension}`);
-      }
-
-      // Enhanced parsing logic for surveillance data
-      const assignments = text.split('\n')
-        .filter(line => line.trim())
-        .map(line => {
-          console.log('Processing line:', line);
-
-          // First, try to clean up the line and normalize whitespace
-          let cleanLine = line.replace(/\s{2,}/g, ' ').trim(); // Replace multiple spaces with single space
-          
-          let date = null;
-          let time = null;
-          let module = null;
-          let room = null;
-
-          // Attempt to parse based on expected table structure (Date Time Module Room)
-          // This is a more structured approach assuming column-like data
-          const parts = cleanLine.split(' ').filter(p => p !== ''); // Split by single space after normalization
-
-          if (parts.length >= 4) {
-            // Try to identify parts based on common patterns and position
-            // Assuming Date is first, then Time, then Module, then Room
-            
-            // Attempt to find date (first part that looks like a date)
-            for (const part of parts) {
-                const dateMatch = part.match(/^(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})$/);
-                if(dateMatch) {
-                    date = dateMatch[1];
-                    // Remove the date part from the remaining parts array
-                    parts.splice(parts.indexOf(part), 1);
-                    break;
-                }
-            }
-
-            // Attempt to find time (first remaining part that looks like a time)
-             for (const part of parts) {
-                const timeMatch = part.match(/^(\d{1,2}:\d{2})$/);
-                if(timeMatch) {
-                    time = timeMatch[1];
-                    // Remove the time part from the remaining parts array
-                    parts.splice(parts.indexOf(part), 1);
-                    break;
-                }
-            }
-
-            // After finding date and time, the remaining parts should be Module and Room
-            // This is a simplification and might need adjustment based on real data complexity
-            if (parts.length >= 2) {
-                 // Assume the first remaining part is the module and the rest is the room
-                 module = parts[0];
-                 room = parts.slice(1).join(' ').trim(); // Join remaining parts for the room
-            } else if (parts.length === 1) {
-                // If only one part left, assign it to module and leave room as null
-                module = parts[0];
-            }
-          }
-
-          // Fallback to previous regex/delimiter logic if structured parsing fails
-          if (!date || !time || !module || !room) {
-             console.log('Structured parsing failed, trying regex/delimiter fallback...');
-             // Re-run the previous logic on the original line
-             const fallbackParts = line.split(' ').filter(p => p !== ''); // Use space as a general delimiter for fallback
-
-              const dateMatch = line.match(/(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/);
-              const timeMatch = line.match(/(\d{1,2}:\d{2})/);
-              const moduleMatch = line.match(/(?:Module|Cours|Course|Matière):?\s*([A-Za-z0-9\s]+)/i);
-              const roomMatch = line.match(/(?:Room|Salle|Local|Amphi):?\s*([A-Za-z0-9\s]+)/i);
-
-              date = dateMatch ? dateMatch[1] : date;
-              time = timeMatch ? timeMatch[1] : time;
-              module = moduleMatch ? moduleMatch[1].trim() : module;
-              room = roomMatch ? roomMatch[1].trim() : room;
-
-               // If regex didn't find everything, try simple splitting as a last resort
-              if (!date || !time || !module || !room) {
-                 const simpleSplit = line.split(/[\s|,	;:-]+/).map(s => s.trim()).filter(s => s !== ''); // Split by multiple possible delimiters
-                 if (simpleSplit.length >= 4) {
-                     if (!date) date = simpleSplit[0];
-                     if (!time) time = simpleSplit[1];
-                     if (!module) module = simpleSplit[2];
-                     if (!room) room = simpleSplit[3];
-                 } else if (simpleSplit.length === 3) {
-                      if (!date) date = simpleSplit[0];
-                     if (!time) time = simpleSplit[1];
-                     if (!module) module = simpleSplit[2]; // Assume last is module
-                 } else if (simpleSplit.length === 2) {
-                      if (!date) date = simpleSplit[0];
-                     if (!time) time = simpleSplit[1]; // Assume last is time
-                 }
-              }
-
-
-             console.log('Fallback extracted values:', { date, time, module, room });
-          }
-
-          console.log('Extracted values:', { date, time, module, room });
-
-          // Format date
-          let formattedDate;
-          try {
-            if (date) {
-              // Try to parse the date
-              const parsedDate = new Date(date);
-              if (!isNaN(parsedDate.getTime())) {
-                formattedDate = parsedDate.toISOString().split('T')[0];
-              } else {
-                // Try alternative date formats
-                const dateFormats = [
-                  'DD/MM/YYYY',
-                  'MM/DD/YYYY',
-                  'YYYY/MM/DD',
-                  'DD-MM-YYYY',
-                  'MM-DD-YYYY',
-                  'YYYY-MM-DD'
-                ];
-                
-                for (const format of dateFormats) {
-                  const parsed = parse(date, format, new Date());
-                  if (!isNaN(parsed.getTime())) {
-                    formattedDate = parsed.toISOString().split('T')[0];
-                    break;
-                  }
-                }
-              }
-            }
-            
-            if (!formattedDate) {
-              formattedDate = new Date().toISOString().split('T')[0];
-            }
-          } catch (error) {
-            console.error('Error parsing date:', error);
-            formattedDate = new Date().toISOString().split('T')[0];
-          }
-
-          // Format time
-          let formattedTime = time || '09:00';
-          if (!formattedTime.match(/^\d{1,2}:\d{2}$/)) {
-            formattedTime = '09:00';
-          }
-
-          // Validate module and room
-          if (!module || module.trim() === '') {
-            module = 'Unknown Module';
-          }
-          if (!room || room.trim() === '') {
-            room = 'Unknown Room';
-          }
-
-          const result = {
-            date: formattedDate,
-            time: formattedTime,
-            module: module,
-            room: room,
-            isResponsible: false,
-            fileId: surveillanceFile.id
-          };
-
-          console.log('Final assignment:', result);
-          return result;
-        });
-
-      console.log('Parsed assignments:', { count: assignments.length });
-
-      // If no assignments were extracted, create a default one
-      if (assignments.length === 0) {
-        console.log('No assignments found, creating default');
-        assignments.push({
-          date: new Date().toISOString().split('T')[0],
-          time: '09:00',
-          module: 'Default Module',
-          room: 'Room 101',
-          isResponsible: false,
-          fileId: surveillanceFile.id
-        });
-      }
-
-      res.json({
-        success: true,
-        message: 'File processed successfully',
-        assignments,
-        fileId: surveillanceFile.id
-      });
-    } catch (error) {
-      console.error('Error processing file:', {
-        error: error.message,
-        stack: error.stack,
-        file: {
-          path: file.path,
-          exists: fs.existsSync(file.path)
-        }
-      });
-      // Clean up the file if processing failed
-      try {
-        await fs.promises.unlink(file.path);
-        console.log('Cleaned up file after error');
-      } catch (unlinkError) {
-        console.error('Error deleting file:', unlinkError);
-      }
-      res.status(500).json({
+    if (!moduleRecord) {
+      return res.status(404).json({
         success: false,
-        message: 'Error processing file: ' + error.message
+        message: 'Module not found'
       });
     }
 
-  } catch (error) {
-    console.error('Error handling file upload:', {
-      error: error.message,
-      stack: error.stack,
-      body: req.body,
-      file: req.file ? {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        path: req.file.path
-      } : null
+    // Create surveillance assignment
+    const assignment = await prisma.surveillanceAssignment.create({
+      data: {
+        userId: parseInt(teacherId),
+        date: new Date(date),
+        time,
+        module,
+        room,
+        isResponsible: isResponsible === true || isResponsible === 'true',
+        canSwap: !(isResponsible === true || isResponsible === 'true'),
+        moduleId: moduleRecord.id
+      }
     });
+
+    // Save file metadata if a file was uploaded
+    if (file) {
+      await prisma.surveillanceFile.create({
+        data: {
+          userId: parseInt(teacherId),
+          originalName: file.originalname,
+          path: file.path,
+          uploadedAt: new Date()
+        }
+      });
+    }
+
+    // Send email notification
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: `"USTHB-Xchange" <${process.env.SMTP_USER}>`,
+      to: teacher.email,
+      subject: 'New Surveillance Assignment',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #059669;">New Surveillance Assignment</h2>
+          <p>You have been assigned a new surveillance duty:</p>
+          <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Date:</strong> ${new Date(date).toLocaleDateString()}</p>
+            <p><strong>Time:</strong> ${time}</p>
+            <p><strong>Module:</strong> ${module}</p>
+            <p><strong>Room:</strong> ${room}</p>
+            <p><strong>Role:</strong> ${isResponsible === true || isResponsible === 'true' ? 'Responsible' : 'Assistant'}</p>
+          </div>
+          <p>Please log in to your dashboard to view more details.</p>
+          <hr style="border: 1px solid #eee; margin: 20px 0;">
+          <p style="color: #666; font-size: 12px;">
+            This is an automated message, please do not reply to this email.
+          </p>
+        </div>
+      `
+    });
+
+    res.json({
+      success: true,
+      message: 'Surveillance assignment created successfully',
+      assignment
+    });
+
+  } catch (error) {
+    console.error('Error creating surveillance assignment:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to handle file upload: ' + error.message
+      message: 'Failed to create surveillance assignment'
     });
   }
 });
@@ -1588,170 +1410,6 @@ router.post('/schedules/section/bulk', async (req, res) => {
       success: false,
       message: 'Error importing schedule',
       error: error.message
-    });
-  }
-});
-
-// Confirm surveillance upload
-router.post('/surveillance/confirm-upload', authenticate, async (req, res) => {
-  try {
-    const { assignments, fileId, teacherId } = req.body;
-
-    if (!assignments || !fileId || !teacherId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Assignments, fileId, and teacherId are required'
-      });
-    }
-
-    // Verify the teacher exists
-    const teacher = await prisma.user.findUnique({
-      where: { id: parseInt(teacherId) }
-    });
-
-    if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        message: 'Teacher not found'
-      });
-    }
-
-    // Create surveillance assignments
-    const createdAssignments = await Promise.all(
-      assignments.map(async (assignment) => {
-        // Find or create the module
-        const module = await prisma.module.upsert({
-          where: {
-            code: assignment.module
-          },
-          update: {},
-          create: {
-            code: assignment.module,
-            name: assignment.module,
-            academicYear: new Date().getFullYear(),
-            semestre: 'SEMESTRE1' // You might want to make this dynamic
-          }
-        });
-
-        // Create the surveillance assignment
-        return prisma.surveillanceAssignment.create({
-          data: {
-            userId: parseInt(teacherId),
-            date: new Date(assignment.date),
-            time: assignment.time,
-            module: assignment.module,
-            room: assignment.room,
-            isResponsible: assignment.isResponsible,
-            canSwap: !assignment.isResponsible,
-            moduleId: module.id,
-            fileId: parseInt(fileId)
-          }
-        });
-      })
-    );
-
-    // Send email notification to the teacher
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
-
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: teacher.email,
-      subject: 'New Surveillance Assignments',
-      html: `
-        <h2>New Surveillance Assignments</h2>
-        <p>You have been assigned to new surveillance duties:</p>
-        <ul>
-          ${assignments.map(assignment => `
-            <li>
-              <strong>Date:</strong> ${new Date(assignment.date).toLocaleDateString()}<br>
-              <strong>Time:</strong> ${assignment.time}<br>
-              <strong>Module:</strong> ${assignment.module}<br>
-              <strong>Room:</strong> ${assignment.room}<br>
-              <strong>Role:</strong> ${assignment.isResponsible ? 'Responsible' : 'Assistant'}
-            </li>
-          `).join('')}
-        </ul>
-        <p>Please log in to your account to view more details.</p>
-      `
-    });
-
-    res.json({
-      success: true,
-      message: 'Surveillance assignments created successfully',
-      assignments: createdAssignments
-    });
-  } catch (error) {
-    console.error('Error confirming surveillance upload:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create surveillance assignments: ' + error.message
-    });
-  }
-});
-
-// DELETE /api/admin/surveillance/teacher/:teacherId/all
-// Deletes all surveillance assignments for a specific teacher
-router.delete('/surveillance/teacher/:teacherId/all', authenticate, async (req, res) => {
-  try {
-    const { teacherId } = req.params;
-    const teacherIdInt = parseInt(teacherId);
-    const userId = req.user.id; // User performing the action
-
-    // Optional: Verify the user is an admin if not already handled by authenticate middleware
-    // const user = await prisma.user.findUnique({ where: { id: userId } });
-    // if (!user || user.role !== 'ADMIN') {
-    //   return res.status(403).json({ success: false, message: 'Unauthorized' });
-    // }
-
-    // Verify the teacher exists (optional but good practice)
-    const teacher = await prisma.user.findUnique({
-        where: { id: teacherIdInt },
-        select: { id: true, name: true }
-    });
-
-    if (!teacher) {
-        return res.status(404).json({ success: false, message: 'Teacher not found.' });
-    }
-
-    // Use a transaction to ensure atomicity
-    const [deleteSwapRequestsResult, deleteAssignmentsResult] = await prisma.$transaction([
-      // 1. Delete all swap requests related to the teacher's assignments
-      prisma.surveillanceSwapRequest.deleteMany({
-        where: {
-          OR: [
-            { fromAssignment: { userId: teacherIdInt } },
-            { toAssignment: { userId: teacherIdInt } },
-          ],
-        },
-      }),
-      // 2. Delete all assignments for the teacher
-      prisma.surveillanceAssignment.deleteMany({
-        where: {
-          userId: teacherIdInt,
-        },
-      }),
-    ]);
-
-    res.json({
-      success: true,
-      message: `Successfully deleted ${deleteAssignmentsResult.count} assignments and ${deleteSwapRequestsResult.count} related swap requests for teacher ${teacher.name}.`,
-      deletedAssignmentsCount: deleteAssignmentsResult.count,
-      deletedSwapRequestsCount: deleteSwapRequestsResult.count,
-    });
-
-  } catch (error) {
-    console.error('Error deleting all assignments for teacher:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to delete all assignments.',
     });
   }
 });

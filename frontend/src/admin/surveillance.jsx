@@ -59,7 +59,7 @@ export default function SurveillanceManagement() {
 
   const fetchTeachers = async () => {
     try {
-      const response = await api.get('/api/admin/teachers');
+      const response = await api.get('/admin/teachers');
       setTeachers(response.data.data || []);
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -70,7 +70,7 @@ export default function SurveillanceManagement() {
   const fetchTeacherAssignments = async (teacherId) => {
     try {
       setLoading(true);
-      const response = await api.get(`/api/admin/surveillance/teacher/${teacherId}`);
+      const response = await api.get(`/admin/surveillance/teacher/${teacherId}`);
       if (response.data.success) {
         setAssignments(response.data.assignments || []);
       } else {
@@ -121,7 +121,7 @@ export default function SurveillanceManagement() {
     formData.append('teacherId', selectedTeacher.id);
 
     try {
-      const response = await api.post('/api/surveillance/upload', formData, {
+      const response = await api.post('/surveillance/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -160,7 +160,7 @@ export default function SurveillanceManagement() {
         canSwap: !responsibleAssignments.has(index) // Set canSwap based on isResponsible
       }));
 
-      await api.post('/api/surveillance/confirm-upload', {
+      await api.post('/surveillance/confirm-upload', {
         assignments: assignmentsWithResponsible,
         fileId: previewAssignments[0]?.fileId,
         teacherId: selectedTeacher.id
@@ -169,7 +169,7 @@ export default function SurveillanceManagement() {
       setShowPreview(false);
       setPreviewAssignments([]);
       setResponsibleAssignments(new Set());
-      fetchTeacherAssignments(selectedTeacher.id);
+      setSelectedTeacher(null);
     } catch (error) {
       console.error('Error confirming upload:', error);
       toast.error(error.response?.data?.message || 'Failed to create surveillance assignments');
@@ -185,11 +185,11 @@ export default function SurveillanceManagement() {
     }
 
     try {
-      const response = await api.post('/api/admin/surveillance', {
+      const response = await api.post('/surveillance', {
         ...newAssignment,
         teacherId: selectedTeacher.id,
         isResponsible: newAssignment.isResponsible,
-        canSwap: !newAssignment.isResponsible
+        canSwap: !newAssignment.isResponsible // If teacher is responsible, they cannot swap
       });
 
       if (response.data.success) {
@@ -216,7 +216,7 @@ export default function SurveillanceManagement() {
     }
 
     try {
-      const response = await api.delete(`/api/admin/surveillance/${assignmentId}`);
+      const response = await api.delete(`/admin/surveillance/${assignmentId}`);
       if (response.data.success) {
         toast.success('Assignment deleted successfully');
         fetchTeacherAssignments(selectedTeacher.id);
@@ -235,7 +235,7 @@ export default function SurveillanceManagement() {
 
     try {
       setDeleting(true);
-      const response = await api.delete(`/api/admin/surveillance/teacher/${selectedTeacher.id}/all`);
+      const response = await api.delete(`/surveillance/teacher/${selectedTeacher.id}/all`);
       if (response.data.success) {
         toast.success('All assignments deleted successfully');
         setShowDeleteConfirm(false);
@@ -430,7 +430,7 @@ export default function SurveillanceManagement() {
       )}
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className="max-w-4xl bg-white max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl bg-white">
           <DialogHeader>
             <DialogTitle>Preview Extracted Data</DialogTitle>
             <DialogDescription>
@@ -443,7 +443,7 @@ export default function SurveillanceManagement() {
           {previewAssignments.length > 0 && (
             <div className="mt-4 space-y-2">
               <h4 className="font-medium text-gray-900">Mark Responsible Assignments:</h4>
-              <div className="border rounded-lg p-4 space-y-3 max-h-[300px] overflow-y-auto">
+              <div className="border rounded-lg p-4 space-y-3">
                 {previewAssignments.map((assignment, index) => (
                   <div key={index} className="flex items-center justify-between">
                     <div>

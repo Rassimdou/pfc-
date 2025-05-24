@@ -31,7 +31,7 @@ export default function Login() {
 
     try {
       console.log('Starting login process...');
-      const response = await api.post("/api/auth/login", { email, password });
+      const response = await api.post("/auth/login", { email, password });
       console.log('Login response received:', response.data);
 
       if (response.data.success) {
@@ -101,7 +101,7 @@ export default function Login() {
 
   const handleGoogleLogin = () => {
     setLoading(true);
-    const googleAuthUrl = `${import.meta.env.VITE_API_URL}/api/auth/google`;
+    const googleAuthUrl = `${import.meta.env.VITE_API_URL}/auth/google`;
     console.log('Redirecting to Google auth:', googleAuthUrl);
     window.location.href = googleAuthUrl;
   };
@@ -216,7 +216,7 @@ export default function Login() {
       </div>
 
       <footer className="border-t bg-white py-4 text-center text-sm text-gray-500">
-        © {new Date().getFullYear()} USTHB-Xchange. All rights reserved.
+        © {new Date().getFullYear()} UniSwap. All rights reserved.
       </footer>
     </div>
   );

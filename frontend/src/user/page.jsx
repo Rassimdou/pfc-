@@ -13,7 +13,6 @@ export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [receivedSwapRequests, setReceivedSwapRequests] = useState([]);
 
   useEffect(() => {
     // Check for token and user data in URL params (for Google auth)
@@ -30,9 +29,6 @@ export default function Dashboard() {
         window.history.replaceState({}, document.title, window.location.pathname);
       } catch (error) {
         console.error('Error parsing user data:', error);
-      } finally {
-         // Fetch user data again to get the latest
-         fetchUserData();
       }
     } else {
       // Check localStorage for existing session
@@ -78,7 +74,7 @@ export default function Dashboard() {
 
   const fetchAssignments = async () => {
     try {
-      const response = await api.get('/api/surveillance/assignments'); // Ensure /api prefix
+      const response = await api.get('/surveillance/assignments');
       if (response.data.success) {
         setAssignments(response.data.assignments || []);
         
@@ -91,8 +87,7 @@ export default function Dashboard() {
         });
 
         if (newAssignments.length > 0) {
-          // Consider a less intrusive notification for new assignments than toast
-          // toast.success(`You have ${newAssignments.length} new surveillance assignment(s)!`);
+          toast.success(`You have ${newAssignments.length} new surveillance assignment(s)!`);
         }
       } else {
         toast.error('Failed to load surveillance assignments');
@@ -122,13 +117,54 @@ export default function Dashboard() {
     return assignmentDate >= now && assignmentDate <= tomorrow;
   });
 
-  // Get pending swap requests for display in card (not tied to notification count)
-  const pendingSwapsForCard = assignments.filter(assignment => 
+  // Get pending swap requests
+  const pendingSwaps = assignments.filter(assignment => 
     assignment.swapRequest && assignment.swapRequest.status === 'PENDING'
   );
 
   return (
     <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-10 border-b bg-white">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-6 w-6 text-emerald-600" />
+            <span className="text-xl font-bold">UniSwap</span>
+          </div>
+          <nav className="hidden md:flex gap-6">
+            <Link to="/dashboard" className="text-sm font-medium text-emerald-600 border-b-2 border-emerald-600 pb-1">
+              Dashboard
+            </Link>
+            <Link to="/surveillance" className="text-sm font-medium hover:text-emerald-600">
+              Surveillance
+            </Link>
+            <Link to="/swaps" className="text-sm font-medium hover:text-emerald-600">
+              Swap Requests
+            </Link>
+          </nav>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" className="relative">
+              <Bell className="h-5 w-5" />
+              {pendingSwaps.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
+                  {pendingSwaps.length}
+                </span>
+              )}
+            </Button>
+            <Button variant="ghost" size="icon">
+              <Settings className="h-5 w-5" />
+            </Button>
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-medium">
+                {user?.firstName?.[0]}{user?.lastName?.[0]}
+              </div>
+              <span className="hidden md:inline text-sm font-medium">
+                {user?.firstName} {user?.lastName}
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+
       <main className="flex-1 bg-gray-50">
         <div className="container py-6 px-4">
           <div className="mb-6">
@@ -185,10 +221,10 @@ export default function Dashboard() {
                 <div className="space-y-3">
                   {loading ? (
                     <div className="text-center py-4">Loading...</div>
-                  ) : pendingSwapsForCard.length === 0 ? (
+                  ) : pendingSwaps.length === 0 ? (
                     <div className="text-center py-4 text-gray-500">No pending swap requests</div>
                   ) : (
-                    pendingSwapsForCard.map((swap) => (
+                    pendingSwaps.map((swap) => (
                       <div
                         key={swap.id}
                         className="flex flex-col gap-2 rounded-lg border p-3 transition-all hover:bg-emerald-50"
@@ -254,4 +290,4 @@ export default function Dashboard() {
       </main>
     </div>
   );
-}
+};

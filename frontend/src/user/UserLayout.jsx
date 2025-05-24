@@ -1,10 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { ShieldCheck, User, Menu, X, Bell } from 'lucide-react';
+import { ShieldCheck, User, Menu, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { Button } from '@/ui/button.jsx';
-import Notifications from '@/user/Notifications.jsx';
-import api from '@/utils/axios'; // Import axios instance
 
 const navLinks = [
   { to: '/user/page', label: 'Dashboard', icon: ShieldCheck },
@@ -17,8 +14,6 @@ export default function UserLayout() {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   // Check authentication
   useEffect(() => {
@@ -64,37 +59,6 @@ export default function UserLayout() {
     navigate('/login');
     toast.success('Logged out successfully');
   };
-
-  // Function to fetch pending requests count
-  const fetchPendingRequestsCount = async () => {
-    try {
-      const response = await api.get('/api/swap/received-requests');
-      if (response.data.success) {
-        setPendingRequestsCount(response.data.requests?.length || 0);
-      } else {
-        console.error('Failed to fetch pending requests count:', response.data.message);
-      }
-    } catch (error) {
-      console.error('Error fetching pending requests count:', error);
-    }
-  };
-
-  // Fetch count on component mount and when notifications visibility changes
-  useEffect(() => {
-    fetchPendingRequestsCount();
-    
-    // Optionally, refetch count when the notifications dropdown is opened
-    // if (showNotifications) {
-    //   fetchPendingRequestsCount();
-    // }
-
-    // Set up interval for periodic fetching (e.g., every 30 seconds)
-    const intervalId = setInterval(fetchPendingRequestsCount, 30000); // Fetch every 30 seconds
-
-    // Clean up the interval on component unmount
-    return () => clearInterval(intervalId);
-
-  }, [/* Add showNotifications here if you want to refetch when it opens */]); // Dependency array
 
   return (
     <div className="min-h-screen flex bg-gray-50">
@@ -155,31 +119,6 @@ export default function UserLayout() {
       {/* Main content */}
       <main className="flex-1 min-h-screen">
         <div className="md:hidden h-16"></div> {/* Spacer for mobile header */}
-        {/* Header with Notification Icon */}
-        <div className="flex justify-end items-center p-4 bg-white shadow-sm">
-           {/* Notification Icon and Badge */}
-           <div className="relative">
-               <Button
-                   variant="ghost"
-                   size="icon"
-                   onClick={() => setShowNotifications(!showNotifications)}
-               >
-                   <Bell className="h-6 w-6" />
-                   {/* Badge for notification count */}
-                   {pendingRequestsCount > 0 && (
-                       <span className="absolute top-0 right-0 block h-4 w-4 rounded-full bg-red-600 text-xs font-bold text-white flex items-center justify-center leading-none">{pendingRequestsCount}</span>
-                   )}
-               </Button>
-
-               {/* Notifications Dropdown/Modal */}
-               {showNotifications && (
-                   <div className="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
-                       <Notifications isVisible={showNotifications} /> {/* Use the Notifications component and pass visibility */}
-                   </div>
-               )}
-           </div>
-        </div>
-        
         <div className="p-6">
           <Outlet />
         </div>
