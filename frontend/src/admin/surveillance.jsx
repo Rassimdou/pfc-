@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar } from '@/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, Search, Upload, FileText, Users, Plus, Download, Trash2, Edit, CheckCircle, XCircle, UserSearch, Lock } from 'lucide-react';
+import { CalendarIcon, Search, Upload, FileText, Users, Plus, Download, Trash2, Edit, CheckCircle, XCircle, UserSearch, Lock, AlertTriangle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '@/utils/axios';
 import { Label } from "@/ui/label"
@@ -41,6 +41,8 @@ export default function SurveillanceManagement() {
     room: '',
     isResponsible: false
   });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -129,7 +131,8 @@ export default function SurveillanceManagement() {
         // Initialize all assignments as non-responsible by default
         const assignments = response.data.assignments.map(assignment => ({
           ...assignment,
-          isResponsible: false
+          isResponsible: false,
+          canSwap: true
         }));
         setPreviewAssignments(assignments);
         setResponsibleAssignments(new Set()); // Reset responsible assignments
@@ -182,9 +185,11 @@ export default function SurveillanceManagement() {
     }
 
     try {
-      const response = await api.post('/admin/surveillance', {
+      const response = await api.post('/surveillance', {
         ...newAssignment,
-        teacherId: selectedTeacher.id
+        teacherId: selectedTeacher.id,
+        isResponsible: newAssignment.isResponsible,
+        canSwap: !newAssignment.isResponsible // If teacher is responsible, they cannot swap
       });
 
       if (response.data.success) {
@@ -219,6 +224,28 @@ export default function SurveillanceManagement() {
     } catch (error) {
       console.error('Error deleting assignment:', error);
       toast.error(error.response?.data?.message || 'Failed to delete assignment');
+    }
+  };
+
+  const handleDeleteAllAssignments = async () => {
+    if (!selectedTeacher) {
+      toast.error('Please select a teacher first');
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      const response = await api.delete(`/surveillance/teacher/${selectedTeacher.id}/all`);
+      if (response.data.success) {
+        toast.success('All assignments deleted successfully');
+        setShowDeleteConfirm(false);
+        fetchTeacherAssignments(selectedTeacher.id);
+      }
+    } catch (error) {
+      console.error('Error deleting assignments:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete assignments');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -331,10 +358,20 @@ export default function SurveillanceManagement() {
                 Surveillance assignments for {selectedTeacher.name}
               </CardDescription>
             </div>
-            <Button onClick={() => setShowAddDialog(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Assignment
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="destructive"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={assignments.length === 0}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete All
+              </Button>
+              <Button onClick={() => setShowAddDialog(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Assignment
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -402,55 +439,36 @@ export default function SurveillanceManagement() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="mt-4">
-            <div className="rounded-lg border overflow-hidden bg-white">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">Date</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">Role</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white">
-                  {previewAssignments.map((assignment, index) => (
-                    <tr key={index} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        {format(new Date(assignment.date), 'dd/MM/yyyy')}
-                      </td>
-                      <td className="px-4 py-3">{assignment.time}</td>
-                      <td className="px-4 py-3">{assignment.module}</td>
-                      <td className="px-4 py-3">{assignment.room}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            id={`responsible-${index}`}
-                            checked={responsibleAssignments.has(index)}
-                            onChange={() => handleToggleResponsible(index)}
-                            className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <label htmlFor={`responsible-${index}`} className="text-sm text-gray-700">
-                            {responsibleAssignments.has(index) ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
-                                <Lock className="w-4 h-4" /> Responsible
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-gray-500">
-                                <Users className="w-4 h-4" /> Assistant
-                              </span>
-                            )}
-                          </label>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* New section for Responsible selection */}
+          {previewAssignments.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <h4 className="font-medium text-gray-900">Mark Responsible Assignments:</h4>
+              <div className="border rounded-lg p-4 space-y-3">
+                {previewAssignments.map((assignment, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{assignment.module} - {assignment.room}</div>
+                      <div className="text-sm text-gray-500">
+                        {format(new Date(assignment.date), 'dd/MM/yyyy')} at {assignment.time}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`responsible-select-${index}`}
+                        checked={responsibleAssignments.has(index)}
+                        onChange={() => handleToggleResponsible(index)}
+                        className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <label htmlFor={`responsible-select-${index}`} className="text-sm text-gray-700">
+                        {responsibleAssignments.has(index) ? 'Responsible' : 'Assistant'}
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="mt-4 p-4 bg-gray-50 rounded-lg">
             <h4 className="font-medium text-gray-900 mb-2">About Roles:</h4>
@@ -563,6 +581,56 @@ export default function SurveillanceManagement() {
             </Button>
             <Button onClick={handleAddAssignment}>
               Create Assignment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Delete All Assignments
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete all surveillance assignments for {selectedTeacher?.name}? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="bg-red-50 p-4 rounded-lg">
+              <h4 className="font-medium text-red-800 mb-2">Warning:</h4>
+              <ul className="text-sm text-red-700 space-y-2">
+                <li>• This will delete all {assignments.length} surveillance assignments</li>
+                <li>• Any pending swap requests will be cancelled</li>
+                <li>• This action cannot be undone</li>
+              </ul>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive"
+              onClick={handleDeleteAllAssignments}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <>
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete All Assignments
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

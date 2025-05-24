@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/ui/card';
 import { Input } from '@/ui/input';
 import { Button } from '@/ui/button';
-import { BadgeCheck, Lock, Upload, FileText, Calendar, Clock, Users, ArrowLeftRight, CheckCircle, XCircle, Search, AlertCircle } from 'lucide-react';
+import { BadgeCheck, Lock, Upload, FileText, Calendar, Clock, Users, ArrowLeftRight, CheckCircle, XCircle, Search, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import UserLayout from './UserLayout';
 import api from '@/utils/axios';
 import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Label } from '@/ui/label';
 
 export default function Surveillance() {
   const navigate = useNavigate();
@@ -18,7 +19,11 @@ export default function Surveillance() {
   const [showSwappableOnly, setShowSwappableOnly] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [showSwapDialog, setShowSwapDialog] = useState(false);
-  const [targetAssignment, setTargetAssignment] = useState('');
+  const [desiredDate, setDesiredDate] = useState('');
+  const [desiredTime, setDesiredTime] = useState('');
+  const [potentialMatches, setPotentialMatches] = useState([]);
+  const [searchingMatches, setSearchingMatches] = useState(false);
+  const [selectedPotentialMatchId, setSelectedPotentialMatchId] = useState(null);
   const [pendingSwaps, setPendingSwaps] = useState([]);
 
   useEffect(() => {
@@ -55,23 +60,71 @@ export default function Surveillance() {
     }
   };
 
-  const handleSwapRequest = async () => {
-    if (!selectedAssignment || !targetAssignment) {
-      toast.error('Please select both assignments');
+  const handleSearchMatches = async () => {
+    if (!selectedAssignment || !desiredDate || !desiredTime) {
+      toast.error('Please select your assignment and enter desired date and time.');
       return;
     }
 
+    setSearchingMatches(true);
+    setPotentialMatches([]);
+    setSelectedPotentialMatchId(null);
+
     try {
-      await api.post(`/surveillance/${selectedAssignment.id}/swap-request`, {
-        targetAssignmentId: targetAssignment
+      const response = await api.post('/swap/request-criteria', {
+        assignmentId: selectedAssignment.id,
+        desiredDate,
+        desiredTime,
       });
-      toast.success('Swap request sent successfully');
-      setShowSwapDialog(false);
-      fetchAssignments();
+
+      if (response.data.success) {
+        setPotentialMatches(response.data.potentialMatches || []);
+        if (response.data.potentialMatches.length === 0) {
+          toast('No swappable assignments found matching your criteria.');
+        } else {
+          toast.success(`${response.data.potentialMatches.length} potential swap targets found.`);
+        }
+      } else {
+        toast.error(response.data.message || 'Failed to search for matches.');
+      }
     } catch (error) {
-      console.error('Error sending swap request:', error);
-      toast.error(error.response?.data?.message || 'Failed to send swap request');
+      console.error('Error searching for matches:', error);
+      toast.error(error.response?.data?.message || 'Failed to search for matches.');
+    } finally {
+      setSearchingMatches(false);
     }
+  };
+
+  const handleInitiateAnonymousSwapRequest = async () => {
+    if (!selectedAssignment || !selectedPotentialMatchId) {
+       toast.error('Please select your assignment and a target assignment from the list.');
+       return;
+    }
+
+    try {
+      // --- Implement logic to initiate anonymous swap request ---
+      // Call backend endpoint POST /api/swap/initiate-anonymous-request
+      const response = await api.post('/swap/initiate-anonymous-request', {
+        fromAssignmentId: selectedAssignment.id,
+        toAssignmentId: selectedPotentialMatchId,
+      });
+
+      if (response.data.success) {
+        toast.success('Anonymous swap request sent successfully!');
+        setShowSwapDialog(false); // Close the dialog
+        setSelectedPotentialMatchId(null); // Clear selected match
+        // Optionally refresh assignments to show pending status
+        fetchAssignments();
+      } else {
+        toast.error(response.data.message || 'Failed to send anonymous swap request.');
+      }
+
+    } catch (error) {
+      console.error('Error initiating anonymous swap request:', error);
+      toast.error(error.response?.data?.message || 'Failed to initiate anonymous swap request.');
+    }
+    // --- End Implementation ---
+
   };
 
   const handleAcceptSwap = async (swapId) => {
@@ -296,12 +349,12 @@ export default function Surveillance() {
           <DialogHeader>
             <DialogTitle>Request Swap</DialogTitle>
             <DialogDescription>
-              Select another assignment to swap with your current assignment
+              Search for swappable assignments by date and time
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Your Assignment</label>
+              <Label className="text-sm font-medium">Your Assignment</Label>
               <div className="p-3 bg-gray-50 rounded-lg">
                 <div className="font-medium">{selectedAssignment?.module}</div>
                 <div className="text-sm text-gray-500">
@@ -312,27 +365,76 @@ export default function Surveillance() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Select Assignment to Swap With</label>
-              <Select value={targetAssignment} onValueChange={setTargetAssignment}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an assignment" />
-                </SelectTrigger>
-                <SelectContent>
-                  {assignments
-                    .filter(a => 
-                      a.id !== selectedAssignment?.id && 
-                      a.canSwap && 
-                      !a.isResponsible &&
-                      !a.swapRequest
-                    )
-                    .map(assignment => (
-                      <SelectItem key={assignment.id} value={assignment.id.toString()}>
-                        {assignment.module} - {new Date(assignment.date).toLocaleDateString()} at {assignment.time}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <Label className="text-sm font-medium" htmlFor="desiredDate">Desired Swap Date and Time</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="desiredDate"
+                  type="date"
+                  value={desiredDate}
+                  onChange={(e) => setDesiredDate(e.target.value)}
+                  className="flex-1"
+                />
+                <Input
+                  type="time"
+                  value={desiredTime}
+                  onChange={(e) => setDesiredTime(e.target.value)}
+                  className="flex-1"
+                />
+                <Button onClick={handleSearchMatches} disabled={searchingMatches}>
+                   {searchingMatches ? (
+                     <>
+                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                       Searching...
+                     </>
+                   ) : (
+                     <>
+                       <Search className="h-4 w-4 mr-2" />
+                       Search
+                     </>
+                   )}
+                 </Button>
+              </div>
             </div>
+
+            {/* Display Potential Matches */}
+            {potentialMatches.length > 0 && (
+               <div className="space-y-2">
+                 <Label className="text-sm font-medium">Potential Swap Targets ({potentialMatches.length})</Label>
+                 <div className="border rounded-lg max-h-40 overflow-y-auto">
+                   {potentialMatches.map(match => (
+                     <div
+                       key={match.id}
+                       className={`flex items-center justify-between p-2 border-b last:border-b-0 cursor-pointer ${selectedPotentialMatchId === match.id ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}
+                       onClick={() => setSelectedPotentialMatchId(match.id)}
+                     >
+                        <div className="flex-1">
+                           <div className="font-medium">{match.module} - {match.room}</div>
+                           <div className="text-sm text-gray-500">
+                              {new Date(match.date).toLocaleDateString()} at {match.time}
+                           </div>
+                           {/* Show sender's assignment details */}
+                           <div className="mt-2 text-sm text-gray-600">
+                              <div className="font-medium text-emerald-600">You will receive:</div>
+                              <div>{match.senderAssignment.module} - {match.senderAssignment.room}</div>
+                              <div className="text-gray-500">
+                                 {new Date(match.senderAssignment.date).toLocaleDateString()} at {match.senderAssignment.time}
+                              </div>
+                           </div>
+                        </div>
+                        {selectedPotentialMatchId === match.id && (
+                            <CheckCircle className="h-5 w-5 text-emerald-600 ml-4" />
+                        )}
+                     </div>
+                   ))}
+                 </div>
+               </div>
+            )}
+
+            {/* Message if no matches found after search */}
+            {!searchingMatches && potentialMatches.length === 0 && desiredDate && desiredTime && (
+                <div className="text-center text-gray-500 py-4">No swappable assignments found matching your criteria.</div>
+            )}
+
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSwapDialog(false)}>
@@ -340,8 +442,8 @@ export default function Surveillance() {
             </Button>
             <Button 
               className="bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleSwapRequest}
-              disabled={!targetAssignment}
+              onClick={handleInitiateAnonymousSwapRequest}
+              disabled={!selectedPotentialMatchId}
             >
               Send Swap Request
             </Button>

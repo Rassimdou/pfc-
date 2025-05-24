@@ -509,8 +509,8 @@ router.post('/confirm-upload', authenticate, async (req, res) => {
               roomType: assignment.roomType || 'SALLE_COURS',
               userId: consistentTeacherId, // Use the consistent teacher ID
               moduleId: module.id,
-              isResponsible: false,
-              canSwap: true
+              isResponsible: assignment.isResponsible || false, // Use value from frontend, default to false
+              canSwap: assignment.hasOwnProperty('canSwap') ? assignment.canSwap : !assignment.isResponsible // Use value from frontend, default based on isResponsible
             }
           });
         } catch (err) {
@@ -973,6 +973,145 @@ router.post('/swap/:requestId/cancel', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to cancel swap request'
+    });
+  }
+});
+
+// POST /api/surveillance
+router.post('/', authenticate, async (req, res) => {
+  try {
+    const { date, time, module, room, teacherId, isResponsible } = req.body;
+
+    if (!date || !time || !module || !room || !teacherId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Verify the teacher exists
+    const teacher = await prisma.user.findFirst({
+      where: { 
+        OR: [
+          { id: parseInt(teacherId) },
+          { email: teacherId.toString().includes('@') ? teacherId : `${teacherId}@usthb.dz` }
+        ]
+      }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    // Create the assignment
+    const assignment = await prisma.surveillanceAssignment.create({
+      data: {
+        date: new Date(date),
+        time,
+        module,
+        room,
+        userId: teacher.id,
+        isResponsible: isResponsible || false,
+        canSwap: !isResponsible // If teacher is responsible, they cannot swap
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Assignment created successfully',
+      assignment
+    });
+  } catch (error) {
+    console.error('Error creating assignment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create assignment'
+    });
+  }
+});
+
+// DELETE /api/surveillance/teacher/:teacherId/all
+router.delete('/teacher/:teacherId/all', authenticate, async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    // Verify the teacher exists
+    const teacher = await prisma.user.findFirst({
+      where: { 
+        OR: [
+          { id: parseInt(teacherId) },
+          { email: teacherId.toString().includes('@') ? teacherId : `${teacherId}@usthb.dz` }
+        ]
+      }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teacher not found'
+      });
+    }
+
+    // Get all assignments for the teacher
+    const assignments = await prisma.surveillanceAssignment.findMany({
+      where: { userId: teacher.id },
+      include: {
+        fromSwapRequests: true,
+        toSwapRequests: true
+      }
+    });
+
+    // Delete all swap requests associated with these assignments
+    const swapRequestIds = [
+      ...assignments.flatMap(a => a.fromSwapRequests.map(r => r.id)),
+      ...assignments.flatMap(a => a.toSwapRequests.map(r => r.id))
+    ];
+
+    if (swapRequestIds.length > 0) {
+      await prisma.surveillanceSwapRequest.deleteMany({
+        where: { id: { in: swapRequestIds } }
+      });
+    }
+
+    // Delete all assignments
+    await prisma.surveillanceAssignment.deleteMany({
+      where: { userId: teacher.id }
+    });
+
+    // Send email notification to the teacher
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM,
+      to: teacher.email,
+      subject: 'Surveillance Assignments Deleted',
+      html: `
+        <h2>Surveillance Assignments Deleted</h2>
+        <p>All your surveillance assignments have been deleted by an administrator.</p>
+        <p>If you believe this was done in error, please contact the administration.</p>
+      `
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${assignments.length} assignments and ${swapRequestIds.length} swap requests`
+    });
+  } catch (error) {
+    console.error('Error deleting assignments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete assignments'
     });
   }
 });

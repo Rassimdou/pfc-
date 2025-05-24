@@ -213,6 +213,7 @@ model SurveillanceSwapRequest {
   status          SwapRequestStatus       @default(PENDING)
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
+  isAnonymous     Boolean                 @default(false)
   
   // Relationships
   fromAssignment  SurveillanceAssignment  @relation("FromAssignment", fields: [fromAssignmentId], references: [id])

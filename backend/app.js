@@ -9,7 +9,7 @@ import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import surveillanceRoutes from './src/routes/surveillanceRoutes.js';
-
+import swapRoutes from './src/routes/swapRoutes.js'
 const prisma = new PrismaClient();
 dotenv.config();
 const app = express();
@@ -50,8 +50,8 @@ app.use((req, res, next) => {
 });
 
 //test database connection
-const users = await prisma.user.findMany();
-console.log(users); // Should show your test user
+// const users = await prisma.user.findMany(); // Commented out potentially blocking code
+// console.log(users); // Commented out
 
 app.get('/test-db', async (req , res)=>{
     try {
@@ -70,7 +70,7 @@ app.get('/test-db', async (req , res)=>{
 app.use('/api/auth', authRoutes);  // Adds /api prefix
 app.use('/api/admin', adminRoutes);
 app.use('/api/surveillance', surveillanceRoutes);
-
+app.use('/api/swap', swapRoutes);
 app.use('/uploads/surveillance', express.static('uploads/surveillance'));
 
 const PORT = process.env.PORT || 5000;
