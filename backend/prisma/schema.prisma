@@ -162,6 +162,8 @@ model ScheduleSlot {
   sectionId       Int
   room            Room?                 @relation(fields: [roomId], references: [id])
   roomId          Int?
+  classroom       Classroom?            @relation(fields: [classroomId], references: [id])
+  classroomId     Int?
   
   // Permutation System
   requestsA       PermutationRequest[]  @relation("SlotA")
@@ -170,6 +172,7 @@ model ScheduleSlot {
   @@unique([moduleId, sectionId, dayOfWeek, startTime])
   @@index([ownerId, moduleId])
   @@index([roomId])
+  @@index([classroomId])
 }
 
 enum DayOfWeek {
@@ -196,16 +199,16 @@ model SurveillanceAssignment {
   // Relationships
   user          User                    @relation(fields: [userId], references: [id])
   userId        Int
-  fromSwapRequests SurveillanceSwapRequest[] @relation("FromAssignment")
-  toSwapRequests SurveillanceSwapRequest[] @relation("ToAssignment")
+  roomRef       Room?                   @relation(fields: [roomRefId], references: [id])
+  roomRefId     Int?
   moduleRef     Module                  @relation(fields: [moduleId], references: [id])
   moduleId      Int
-  roomRef       Room?                   @relation(fields: [roomId], references: [id])
-  roomId        Int?
+  fromSwapRequests SurveillanceSwapRequest[] @relation("FromAssignment")
+  toSwapRequests SurveillanceSwapRequest[] @relation("ToAssignment")
 
-  @@index([date, userId])
-  @@index([module, room])
-  @@index([roomId])
+  @@index([userId])
+  @@index([roomRefId])
+  @@index([moduleId])
 }
 
 model SurveillanceSwapRequest {
@@ -326,21 +329,35 @@ enum RoomType {
 
 // --- Room Management ---
 model Room {
-  id            Int       @id @default(autoincrement())
-  number        String    @unique  // e.g., "A101", "B203", etc.
-  name          String    // e.g., "Amphitheatre 1", "Salle TP 3", etc.
+  id            Int            @id @default(autoincrement())
+  name          String         @unique
   type          RoomType
   capacity      Int?
   floor         Int?
-  building      String?   // e.g., "Building A", "Main Building", etc.
-  isAvailable   Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  building      String?
+  isAvailable   Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   // Relations
+  scheduleSlots ScheduleSlot[]
   surveillanceAssignments SurveillanceAssignment[]
-  scheduleSlots          ScheduleSlot[]
 
-  @@index([type, building])
-  @@index([number])
+  @@index([name, type])
+}
+
+model Classroom {
+  id            Int            @id @default(autoincrement())
+  name          String         @unique
+  capacity      Int?
+  floor         Int?
+  building      String?
+  isAvailable   Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relations
+  schedules     ScheduleSlot[]
+
+  @@index([name])
 }

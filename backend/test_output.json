@@ -1,0 +1,64 @@
+{
+  "success": true,
+  "data": {
+    "headerInfo": {
+      "university": "University of Science and Technology Houari Boumediene",
+      "speciality": "3rd year SOFT.ENG",
+      "section": "A",
+      "academicYear": "2024/2025",
+      "semester": "1",
+      "date": "21/11/2024",
+      "groups": [
+        1,
+        2,
+        3
+      ]
+    },
+    "timeSlots": [
+      "08:00 - 09:30",
+      "09:40 - 11:10",
+      "11:20 - 12:50",
+      "13:00 - 14:30",
+      "14:40 - 16:10"
+    ],
+    "scheduleEntries": [
+      {
+        "day": null,
+        "timeSlot": "08:00 - 09:30",
+        "courseName": "Algorithmique et Complexité /Génie logiciel , Algorithmique et Complexité",
+        "courseType": "Avancées -- DW, BOULKRINAT Avancées course",
+        "room": "354",
+        "group": "G1",
+        "professor": null
+      },
+      {
+        "day": "Sat",
+        "timeSlot": "08:00 - 09:30",
+        "courseName": "Génie logiciel , /Algorithmique et Complexité HEDJAZI-DELLAL",
+        "courseType": "Synchronisation course Architecture course",
+        "room": "350",
+        "group": "G2",
+        "professor": "BELKHIR ZAIDI"
+      },
+      {
+        "day": "Tue",
+        "timeSlot": "08:00 - 09:30",
+        "courseName": "Système d’Exploitation : / Administration et Architecture BELKHIR FRIHI",
+        "courseType": "COURSE",
+        "room": "265",
+        "group": "G2",
+        "professor": null
+      },
+      {
+        "day": "Tue",
+        "timeSlot": "08:00 - 09:30",
+        "courseName": "Techniques d’Optimisation , ZAIDI",
+        "courseType": "Fondements de l’IA course",
+        "room": "251",
+        "group": "G2",
+        "professor": "ZAIDI HACHEMI HACHEMI"
+      }
+    ],
+    "rawContent": "University of Science and Technology Houari Boumediene\nVice-rectorate in charge of the higher education of graduation, the continuing education\net degrees\nSchedules of : 3rd year SOFT.ENG -- Section: A\nCollege year: 2024/2025 Semester: 1 Date: 21/11/2024\n16:20\n08:00 - 09:30 09:40 - 11:10 11:20 - 12:50 13:00 - 14:30 14:40 - 16:10 -\n17:50\nG1:354 G1:354\n/Algorithmique et Complexité /Génie logiciel -- DW, Algorithmique et Complexité\nAvancées -- DW, BOULKRINAT Avancées course\nSat\nG2:350 G2:350 C\n/Génie logiciel -- DW, /Algorithmique et Complexité HEDJAZI-DELLAL\nBOULKRINAT Avancées -- DW,\nSystème d’Exploitation : Techniques d’Optimisation\nG1:453\nSynchronisation course course\nSun /Système d’Exploitation :\nSC SC\nSynchronisation -- DW, ZAIDI\nBELKHIR ZAIDI\nMon\nSystème d’Exploitation : Administration et\nSynchronisation course Architecture course\nTue\nG2:265 G3:TP.C8\n421T F\n/Système d’Exploitation : / Administration et Architecture BELKHIR FRIHI\nSynchronisation -- DW, ZAIDI -- PW, FRIHI\nG1:217 Génie logiciel course Génie logiciel course\nG2:251\nWed /Techniques d’Optimisation -- DW, 244T 244T\n/Techniques d’Optimisation -- DW, ZAIDI\nZAIDI HACHEMI HACHEMI\nAlgorithmique et Complexité G2:TP129\nFondements de l’IA course\nAvancées course / Administration et Architecture -- PW,\nThu R2 431T FRIHI G1:TP131\nHEDJAZI-DELLAL AZZOUNE / Administration et Architecture\n-- PW, FRIHI"
+  }
+}

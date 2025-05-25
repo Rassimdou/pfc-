@@ -73,6 +73,126 @@ router.put('/teachers/:id', authenticate, updateTeacher);
 router.delete('/teachers/:id', authenticate, deleteTeacher);
 router.delete('/pending-teachers/:id', authenticate, deletePendingTeacher);
 
+// Get all classrooms
+router.get('/classrooms', authenticate, async (req, res) => {
+  try {
+    const rooms = await prisma.room.findMany({
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    res.json({
+      success: true,
+      data: rooms
+    });
+  } catch (error) {
+    console.error('Error fetching rooms:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch rooms'
+    });
+  }
+});
+
+// Create a new classroom
+router.post('/classrooms', authenticate, async (req, res) => {
+  try {
+    const { name, type, capacity, floor, building } = req.body;
+
+    // Generate a room number if not provided
+    const roomNumber = name || `ROOM-${Date.now()}`;
+
+    const classroom = await prisma.room.create({
+      data: {
+        name,
+        number: roomNumber,
+        type,
+        capacity: capacity ? parseInt(capacity) : null,
+        floor: floor ? parseInt(floor) : null,
+        building,
+        isAvailable: true
+      }
+    });
+
+    res.json({
+      success: true,
+      data: classroom
+    });
+  } catch (error) {
+    console.error('Error creating classroom:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create classroom'
+    });
+  }
+});
+
+// Update a classroom
+router.put('/classrooms/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, type, capacity, floor, building, isAvailable } = req.body;
+
+    const classroom = await prisma.room.update({
+      where: { id: parseInt(id) },
+      data: {
+        name,
+        type,
+        capacity: capacity ? parseInt(capacity) : null,
+        floor: floor ? parseInt(floor) : null,
+        building,
+        isAvailable
+      }
+    });
+
+    res.json({
+      success: true,
+      data: classroom
+    });
+  } catch (error) {
+    console.error('Error updating classroom:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update classroom'
+    });
+  }
+});
+
+// Delete a classroom
+router.delete('/classrooms/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if classroom is being used in any schedules
+    const schedules = await prisma.scheduleSlot.findMany({
+      where: { roomId: parseInt(id) }
+    });
+
+    if (schedules.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete classroom as it is being used in schedules'
+      });
+    }
+
+    await prisma.room.delete({
+      where: { id: parseInt(id) }
+    });
+
+    res.json({
+      success: true,
+      message: 'Classroom deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting classroom:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete classroom'
+    });
+  }
+});
+
 // Admin surveillance upload
 router.post('/surveillance/upload', authenticate, uploadMulter.single('file'), async (req, res) => {
   try {
@@ -457,20 +577,35 @@ router.delete('/surveillance/:id', authenticate, async (req, res) => {
 // Get all exchange history
 router.get('/exchanges', authenticate, async (req, res) => {
   try {
-    const exchanges = await prisma.exchange.findMany({
+    const exchanges = await prisma.surveillanceSwapRequest.findMany({
       include: {
-        initiator: {
+        user: {
           select: {
             id: true,
             name: true,
             email: true
           }
         },
-        receiver: {
-          select: {
-            id: true,
-            name: true,
-            email: true
+        fromAssignment: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true
+              }
+            }
+          }
+        },
+        toAssignment: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true
+              }
+            }
           }
         }
       },
@@ -493,55 +628,59 @@ router.get('/exchanges', authenticate, async (req, res) => {
 });
 
 // Get all modules
-router.get('/modules', authenticate, async (req, res) => {
+router.get('/modules', async (req, res) => {
   try {
     const modules = await prisma.module.findMany({
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        description: true,
-        academicYear: true,
-        palier: true,
-        semestre: true,
-        speciality: {
-          select: {
-            id: true,
-            name: true
-          }
-        }
-      },
-      orderBy: [
-        { academicYear: 'desc' },
-        { code: 'asc' }
-      ]
+      include: {
+        speciality: true,
+        year: true,
+        palier: true
+      }
     });
-
-    res.json({
-      success: true,
-      modules
-    });
+    res.json({ success: true, data: modules });
   } catch (error) {
     console.error('Error fetching modules:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch modules'
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch modules' });
   }
 });
 
 // Schedule extraction route
 router.post('/extract-schedule', authenticate, upload.single('file'), handleUploadError, async (req, res) => {
+  let uploadedFile = null;
   try {
     if (!req.file) {
+      console.error('No file uploaded');
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
       });
     }
 
-    console.log('Processing file:', req.file.path);
-    const result = await FileProcessingService.processFile(req.file.path);
+    uploadedFile = req.file;
+    console.log('Processing file:', {
+      path: uploadedFile.path,
+      originalname: uploadedFile.originalname,
+      mimetype: uploadedFile.mimetype,
+      size: uploadedFile.size
+    });
+
+    // Verify file exists
+    try {
+      await fs.promises.access(uploadedFile.path);
+      console.log('File exists and is accessible');
+    } catch (error) {
+      console.error('File not found or not accessible:', error);
+      throw new Error(`File not found or not accessible: ${error.message}`);
+    }
+
+    // Process the file
+    console.log('Starting file processing');
+    const result = await FileProcessingService.processFile(uploadedFile.path);
+    console.log('File processing completed:', {
+      success: result.success,
+      hasData: !!result.data,
+      error: result.error
+    });
 
     if (!result.success) {
       throw new Error(result.error);
@@ -556,13 +695,18 @@ router.post('/extract-schedule', authenticate, upload.single('file'), handleUplo
     console.error('Error processing schedule file:', error);
     res.status(500).json({
       success: false,
-      message: `Error processing ${req.file?.mimetype === 'application/pdf' ? 'PDF' : 'DOCX'}: ${error.message}`
+      message: `Error processing ${uploadedFile?.mimetype === 'application/pdf' ? 'PDF' : 'DOCX'}: ${error.message}`,
+      details: {
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      }
     });
   } finally {
     // Clean up the uploaded file
-    if (req.file?.path) {
+    if (uploadedFile?.path) {
       try {
-        await fs.promises.unlink(req.file.path);
+        await fs.promises.unlink(uploadedFile.path);
+        console.log('Uploaded file cleaned up successfully');
       } catch (error) {
         console.error('Error cleaning up file:', error);
       }
@@ -1414,4 +1558,162 @@ router.post('/schedules/section/bulk', async (req, res) => {
   }
 });
 
+// Module Management Routes
+router.post('/modules', async (req, res) => {
+  try {
+    const { code, name, description, academicYear, palierId, yearId, specialityId, semestre } = req.body;
+
+    // Validate required fields
+    if (!code || !name || !specialityId || !yearId || !palierId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Check if module code already exists
+    const existingModule = await prisma.module.findFirst({
+      where: { code }
+    });
+
+    if (existingModule) {
+      return res.status(400).json({
+        success: false,
+        message: 'Module code already exists'
+      });
+    }
+
+    const module = await prisma.module.create({
+      data: {
+        code,
+        name,
+        description,
+        academicYear: academicYear || new Date().getFullYear(),
+        palierId: parseInt(palierId),
+        yearId: parseInt(yearId),
+        specialityId: parseInt(specialityId),
+        semestre: semestre || 'SEMESTRE1'
+      },
+      include: {
+        speciality: true,
+        year: true,
+        palier: true
+      }
+    });
+
+    res.json({ success: true, data: module });
+  } catch (error) {
+    console.error('Error creating module:', error);
+    res.status(500).json({ success: false, message: 'Failed to create module' });
+  }
+});
+
+router.put('/modules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { code, name, description, academicYear, palierId, yearId, specialityId, semestre } = req.body;
+
+    // Validate required fields
+    if (!code || !name || !specialityId || !yearId || !palierId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Check if module exists
+    const existingModule = await prisma.module.findUnique({
+      where: { id: parseInt(id) }
+    });
+
+    if (!existingModule) {
+      return res.status(404).json({
+        success: false,
+        message: 'Module not found'
+      });
+    }
+
+    // Check if new code conflicts with existing modules
+    if (code !== existingModule.code) {
+      const codeExists = await prisma.module.findFirst({
+        where: {
+          code,
+          id: { not: parseInt(id) }
+        }
+      });
+
+      if (codeExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Module code already exists'
+        });
+      }
+    }
+
+    const updatedModule = await prisma.module.update({
+      where: { id: parseInt(id) },
+      data: {
+        code,
+        name,
+        description,
+        academicYear: academicYear || existingModule.academicYear,
+        palierId: parseInt(palierId),
+        yearId: parseInt(yearId),
+        specialityId: parseInt(specialityId),
+        semestre: semestre || existingModule.semestre
+      },
+      include: {
+        speciality: true,
+        year: true,
+        palier: true
+      }
+    });
+
+    res.json({ success: true, data: updatedModule });
+  } catch (error) {
+    console.error('Error updating module:', error);
+    res.status(500).json({ success: false, message: 'Failed to update module' });
+  }
+});
+
+router.delete('/modules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if module exists
+    const module = await prisma.module.findUnique({
+      where: { id: parseInt(id) }
+    });
+
+    if (!module) {
+      return res.status(404).json({
+        success: false,
+        message: 'Module not found'
+      });
+    }
+
+    // Check if module is being used in any schedules
+    const scheduleSlots = await prisma.scheduleSlot.findFirst({
+      where: { moduleId: parseInt(id) }
+    });
+
+    if (scheduleSlots) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete module as it is being used in schedules'
+      });
+    }
+
+    await prisma.module.delete({
+      where: { id: parseInt(id) }
+    });
+
+    res.json({ success: true, message: 'Module deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting module:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete module' });
+  }
+});
+
 export default router;
+

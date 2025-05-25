@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { getSwapRequestTemplate, getPermutationRequestTemplate } from './emailTemplates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,39 +24,51 @@ const invitationTemplate = fs.readFileSync(
   'utf8'
 );
 
-export const sendInvitationEmail = async (email) => {
-  try {
-    console.log('Sending invitation email to:', email);
-    
-    const mailOptions = {
-      from: `"USTHB-Xchange" <${process.env.SMTP_USER}>`,
-      to: email,
-      subject: 'Welcome to USTHB-Xchange - Complete Your Registration',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #059669;">Welcome to USTHB-Xchange!</h2>
-          <p>You've been invited to join USTHB-Xchange as a teacher. To complete your registration, please visit:</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${process.env.FRONTEND_URL}/signup" 
-               style="background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
-              Complete Registration
-            </a>
-          </div>
-          <p>You can also sign up using your Google account by clicking the "Continue with Google" button on the registration page.</p>
-          <p>If you didn't request this invitation, please ignore this email.</p>
-          <hr style="border: 1px solid #eee; margin: 20px 0;">
-          <p style="color: #666; font-size: 12px;">
-            This is an automated message, please do not reply to this email.
-          </p>
-        </div>
-      `
-    };
+export const sendInvitationEmail = async (email, invitationLink) => {
+  const mailOptions = {
+    from: process.env.SMTP_FROM,
+    to: email,
+    subject: 'Invitation to Join USTHB Platform',
+    html: `
+      <h1>Welcome to USTHB Platform</h1>
+      <p>You have been invited to join the USTHB platform. Click the link below to complete your registration:</p>
+      <a href="${invitationLink}">Complete Registration</a>
+    `
+  };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent successfully:', info.messageId);
-    return true;
+  await transporter.sendMail(mailOptions);
+};
+
+export const sendSwapRequestNotification = async (receiverEmail, senderName, assignmentDetails) => {
+  const mailOptions = {
+    from: process.env.SMTP_FROM,
+    to: receiverEmail,
+    subject: 'New Surveillance Swap Request',
+    html: getSwapRequestTemplate(senderName, assignmentDetails)
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Swap request notification email sent successfully');
   } catch (error) {
-    console.error('Error sending invitation email:', error);
-    throw new Error('Failed to send invitation email');
+    console.error('Failed to send swap request notification:', error);
+    throw error;
+  }
+};
+
+export const sendPermutationRequestNotification = async (receiverEmail, senderName, slotDetails) => {
+  const mailOptions = {
+    from: process.env.SMTP_FROM,
+    to: receiverEmail,
+    subject: 'New Schedule Permutation Request',
+    html: getPermutationRequestTemplate(senderName, slotDetails)
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Permutation request notification email sent successfully');
+  } catch (error) {
+    console.error('Failed to send permutation request notification:', error);
+    throw error;
   }
 };

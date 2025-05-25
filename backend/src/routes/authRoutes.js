@@ -65,8 +65,13 @@ router.get(
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(info?.message || 'Authentication failed')}`);
         }
 
-        // If user needs to complete registration (no phone number), redirect to signup
-        if (!user.phoneNumber) {
+        // Check if user exists in database
+        const existingUser = await prisma.user.findUnique({
+          where: { email: user.email }
+        });
+
+        // If user exists but has no phone number, redirect to signup
+        if (existingUser && !existingUser.phoneNumber) {
           return res.redirect(`${process.env.FRONTEND_URL}/signup?token=${user.accessToken}&email=${encodeURIComponent(user.email)}`);
         }
 

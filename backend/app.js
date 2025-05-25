@@ -10,6 +10,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import surveillanceRoutes from './src/routes/surveillanceRoutes.js';
 import swapRoutes from './src/routes/swapRoutes.js'
+import notificationRoutes from './src/routes/notificationRoutes.js';
 const prisma = new PrismaClient();
 dotenv.config();
 const app = express();
@@ -71,6 +72,7 @@ app.use('/api/auth', authRoutes);  // Adds /api prefix
 app.use('/api/admin', adminRoutes);
 app.use('/api/surveillance', surveillanceRoutes);
 app.use('/api/swap', swapRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/uploads/surveillance', express.static('uploads/surveillance'));
 
 const PORT = process.env.PORT || 5000;

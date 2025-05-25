@@ -2,12 +2,13 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { authenticate } from '../middleware/authMiddleware.js';
+import { isAuthenticated } from '../middleware/auth.js';
 import prisma from '../lib/prismaClient.js';
 import mammoth from 'mammoth';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
 import { JSDOM } from 'jsdom';
+import { createSwapRequest, getPendingSwapRequests } from '../controllers/surveillanceController.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -322,7 +323,7 @@ function determineRoomType(room) {
 }
 
 // GET /api/surveillance
-router.get('/', authenticate, async (req, res) => {
+router.get('/', isAuthenticated, async (req, res) => {
   try {
     const assignments = await prisma.surveillanceAssignment.findMany({
       where: { userId: req.user.id },
@@ -336,7 +337,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // POST /api/surveillance/upload
-router.post('/upload', authenticate, upload.single('file'), async (req, res) => {
+router.post('/upload', isAuthenticated, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -386,7 +387,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
 });
 
 // POST /api/surveillance/confirm-upload
-router.post('/confirm-upload', authenticate, async (req, res) => {
+router.post('/confirm-upload', isAuthenticated, async (req, res) => {
   try {
     const { assignments, fileId, teacherId } = req.body;
     
@@ -567,7 +568,7 @@ router.post('/confirm-upload', authenticate, async (req, res) => {
 });
 
 // GET /api/surveillance/assignments
-router.get('/assignments', authenticate, async (req, res) => {
+router.get('/assignments', isAuthenticated, async (req, res) => {
   try {
     const assignments = await prisma.surveillanceAssignment.findMany({
       where: {
@@ -608,7 +609,7 @@ router.get('/assignments', authenticate, async (req, res) => {
 });
 
 // Create swap request
-router.post('/:assignmentId/swap-request', authenticate, async (req, res) => {
+router.post('/:assignmentId/swap-request', isAuthenticated, async (req, res) => {
   try {
     const { assignmentId } = req.params;
     const { targetAssignmentId } = req.body;
@@ -733,7 +734,7 @@ router.post('/:assignmentId/swap-request', authenticate, async (req, res) => {
 });
 
 // Accept swap request
-router.post('/swap/:requestId/accept', authenticate, async (req, res) => {
+router.post('/swap/:requestId/accept', isAuthenticated, async (req, res) => {
   try {
     const { requestId } = req.params;
 
@@ -832,7 +833,7 @@ router.post('/swap/:requestId/accept', authenticate, async (req, res) => {
 });
 
 // Decline swap request
-router.post('/swap/:requestId/decline', authenticate, async (req, res) => {
+router.post('/swap/:requestId/decline', isAuthenticated, async (req, res) => {
   try {
     const { requestId } = req.params;
 
@@ -905,7 +906,7 @@ router.post('/swap/:requestId/decline', authenticate, async (req, res) => {
 });
 
 // Cancel swap request
-router.post('/swap/:requestId/cancel', authenticate, async (req, res) => {
+router.post('/swap/:requestId/cancel', isAuthenticated, async (req, res) => {
   try {
     const { requestId } = req.params;
 
@@ -978,7 +979,7 @@ router.post('/swap/:requestId/cancel', authenticate, async (req, res) => {
 });
 
 // POST /api/surveillance
-router.post('/', authenticate, async (req, res) => {
+router.post('/', isAuthenticated, async (req, res) => {
   try {
     const { date, time, module, room, teacherId, isResponsible } = req.body;
 
@@ -1034,7 +1035,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // DELETE /api/surveillance/teacher/:teacherId/all
-router.delete('/teacher/:teacherId/all', authenticate, async (req, res) => {
+router.delete('/teacher/:teacherId/all', isAuthenticated, async (req, res) => {
   try {
     const { teacherId } = req.params;
 
@@ -1115,5 +1116,11 @@ router.delete('/teacher/:teacherId/all', authenticate, async (req, res) => {
     });
   }
 });
+
+// Create a swap request
+router.post('/swap-requests', isAuthenticated, createSwapRequest);
+
+// Get pending swap requests for the current user
+router.get('/swap-requests/pending', isAuthenticated, getPendingSwapRequests);
 
 export default router;

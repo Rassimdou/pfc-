@@ -9,15 +9,16 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useState, useRef, useEffect } from "react"
 import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
+import axios from 'axios';
 
 export default function Planning() {
   // State for form fields
   const [formData, setFormData] = useState({
+    fileType: 'pdf',
     semester: '',
     year: '',
     speciality: '',
-    section: '',
-    fileType: 'docx'
+    section: ''
   });
 
   // State for classrooms
@@ -62,10 +63,12 @@ export default function Planning() {
 
   // State for new/edit classroom form
   const [newClassroom, setNewClassroom] = useState({
-    number: "",
-    type: "SALLE_COURS",
-    capacity: "",
-    status: "Available"
+    name: '',
+    number: '',
+    type: 'SALLE_COURS',
+    capacity: '',
+    floor: '',
+    building: ''
   });
 
   // State for dialog visibility
@@ -150,7 +153,7 @@ export default function Planning() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState('');
   const fileInputRef = useRef(null);
 
   // State for validation
@@ -203,6 +206,15 @@ export default function Planning() {
       groups: ['G2']
     }
   ];
+
+  // Add new state for processing logs
+  const [processingLogs, setProcessingLogs] = useState([]);
+  const [activeTab, setActiveTab] = useState('upload');
+
+  // Add this function to handle logging
+  const addProcessingLog = (message, type = 'info') => {
+    setProcessingLogs(prev => [...prev, { message, type, timestamp: new Date().toISOString() }]);
+  };
 
   // Fetch specialities on component mount
   useEffect(() => {
@@ -384,34 +396,63 @@ export default function Planning() {
   };
 
   // Handle adding new classroom
-  const handleAddClassroom = () => {
-    const classroom = {
-      id: classrooms.length + 1,
-      ...newClassroom,
-      capacity: parseInt(newClassroom.capacity)
-    };
-    setClassrooms(prev => [...prev, classroom]);
-    setNewClassroom({
-      number: "",
-      type: "SALLE_COURS",
-      capacity: "",
-      status: "Available"
-    });
-    setIsAddDialogOpen(false);
+  const handleAddClassroom = async () => {
+    try {
+      const response = await api.post('/admin/classrooms', {
+        ...newClassroom,
+        capacity: parseInt(newClassroom.capacity) || null,
+        floor: parseInt(newClassroom.floor) || null
+      });
+
+      if (response.data.success) {
+        toast.success('Classroom added successfully');
+        setClassrooms(prev => [...prev, response.data.data]);
+        setNewClassroom({
+          name: '',
+          number: '',
+          type: 'SALLE_COURS',
+          capacity: '',
+          floor: '',
+          building: ''
+        });
+        setIsAddDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Error adding classroom:', error);
+      toast.error(error.response?.data?.message || 'Failed to add classroom');
+    }
   };
 
   // Handle editing classroom
-  const handleEditClassroom = () => {
-    setClassrooms(prev => prev.map(room => 
-      room.id === selectedClassroom.id ? { ...selectedClassroom } : room
-    ));
-    setIsEditDialogOpen(false);
+  const handleEditClassroom = async () => {
+    try {
+      const response = await api.put(`/admin/classrooms/${selectedClassroom.id}`, selectedClassroom);
+      if (response.data.success) {
+        toast.success('Classroom updated successfully');
+        setClassrooms(prev => prev.map(room => 
+          room.id === selectedClassroom.id ? response.data.data : room
+        ));
+        setIsEditDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Error updating classroom:', error);
+      toast.error(error.response?.data?.message || 'Failed to update classroom');
+    }
   };
 
   // Handle deleting classroom
-  const handleDeleteClassroom = () => {
-    setClassrooms(prev => prev.filter(room => room.id !== selectedClassroom.id));
-    setIsDeleteDialogOpen(false);
+  const handleDeleteClassroom = async () => {
+    try {
+      const response = await api.delete(`/admin/classrooms/${selectedClassroom.id}`);
+      if (response.data.success) {
+        toast.success('Classroom deleted successfully');
+        setClassrooms(prev => prev.filter(room => room.id !== selectedClassroom.id));
+        setIsDeleteDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Error deleting classroom:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete classroom');
+    }
   };
 
   // Handle edit button click
@@ -566,63 +607,67 @@ export default function Planning() {
     return Object.keys(errors).length === 0;
   };
 
-  // Update handleProcessFile to include file type
+  // Update handleProcessFile to use the new logging
   const handleProcessFile = async () => {
-    if (!validateForm()) {
-      setError('Please fill in all required fields');
-      return;
-    }
-
-    const formDataToSend = new FormData();
-    formDataToSend.append('file', selectedFile);
-    formDataToSend.append('semester', formData.semester);
-    formDataToSend.append('year', formData.year);
-    formDataToSend.append('speciality', formData.speciality);
-    formDataToSend.append('section', formData.section);
-    formDataToSend.append('fileType', formData.fileType);
-
     try {
       setIsProcessing(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        toast.error('Please log in to access this feature');
+      addProcessingLog('Starting file processing...', 'info');
+
+      if (!selectedFile) {
+        addProcessingLog('No file selected', 'error');
+        toast.error('Please select a file first');
         return;
       }
 
-      const response = await api.post('/admin/extract-schedule', formDataToSend, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${token}`
+      const formDataToSend = new FormData();
+      formDataToSend.append('file', selectedFile);
+      formDataToSend.append('fileType', formData.fileType);
+
+      addProcessingLog(`Uploading ${formData.fileType.toUpperCase()} file...`, 'info');
+
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/admin/extract-schedule`,
+        formDataToSend,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
         }
-      });
-      
-      console.log('File processing response:', response.data);
-      
+      );
+
+      console.log('Server response:', response.data);
+
       if (response.data.success) {
-        // Check if the response has the expected structure
-        if (!response.data.data || !response.data.data.scheduleEntries) {
-          console.error('Invalid response structure:', response.data);
-          toast.error('Invalid data format received from server');
-          return;
+        // Use the database-ready format if available, otherwise use the regular data
+        const scheduleData = response.data.databaseReady || response.data.data;
+        console.log('Extracted data:', scheduleData);
+        
+        setExtractedData({
+          success: true,
+          data: scheduleData
+        });
+
+        addProcessingLog(`Successfully processed ${formData.fileType.toUpperCase()} file`, 'success');
+        addProcessingLog(`Found ${scheduleData.scheduleEntries?.length || 0} schedule entries`, 'info');
+        
+        if (scheduleData.headerInfo) {
+          addProcessingLog('Header Information:', 'info');
+          Object.entries(scheduleData.headerInfo).forEach(([key, value]) => {
+            if (value) addProcessingLog(`${key}: ${value}`, 'info');
+          });
         }
 
-        setExtractedData(response.data);
-        toast.success('Schedule processed successfully');
-        const tabsList = document.querySelector('[role="tablist"]');
-        const previewTab = tabsList?.querySelector('[value="preview"]');
-        if (previewTab) {
-          previewTab.click();
-        }
+        // Switch to preview tab
+        setActiveTab('preview');
       } else {
-        const errorMsg = response.data.message || 'Error processing file';
-        setError(errorMsg);
-        toast.error(errorMsg);
+        addProcessingLog(`Error: ${response.data.error}`, 'error');
+        toast.error(response.data.error || 'Failed to process file');
       }
-    } catch (err) {
-      console.error('Error uploading file:', err);
-      const errorMessage = err.response?.data?.message || 'Error processing file';
-      setError(errorMessage);
-      toast.error(errorMessage);
+    } catch (error) {
+      console.error('Error processing file:', error);
+      addProcessingLog(`Error: ${error.response?.data?.error || error.message}`, 'error');
+      toast.error(error.response?.data?.error || 'Failed to process file');
     } finally {
       setIsProcessing(false);
     }
@@ -671,23 +716,36 @@ export default function Planning() {
         scheduleEntries: scheduleEntries.map(entry => {
           console.log('Processing entry:', entry);
           
-          if (!entry || !entry.modules || !entry.professors || !entry.rooms) {
-            console.error('Invalid entry format:', entry);
-            throw new Error('Invalid schedule entry format');
-          }
+          // Extract module name from content
+          const moduleMatch = entry.content?.match(/([^/]+)(?:\s*--\s*[A-Z]+)?/);
+          const moduleName = moduleMatch ? moduleMatch[1].trim() : '';
+          
+          // Extract professor name
+          const professorMatch = entry.content?.match(/([A-Z-]+)$/);
+          const professorName = professorMatch ? professorMatch[1].trim() : '';
+          
+          // Extract room number
+          const roomMatch = entry.content?.match(/(?:G\d+:)?(\d+[A-Z]?|[A-Z]\d+)/);
+          const roomNumber = roomMatch ? roomMatch[1].trim() : '';
+          
+          // Extract group
+          const groupMatch = entry.content?.match(/G\d+/);
+          const group = groupMatch ? groupMatch[0] : '';
+          
+          // Determine type
+          const type = entry.content?.includes('course') ? 'COURSE' : 
+                      entry.content?.includes('DW') ? 'TD' : 
+                      entry.content?.includes('PW') ? 'TP' : 'OTHER';
 
-          const processedEntry = {
+          return {
             day: entry.day,
             timeSlot: entry.timeSlot,
-            module: entry.modules[0],
-            professor: entry.professors[0],
-            room: entry.rooms[0]?.number || '',
-            type: entry.type || 'COURSE',
-            groups: Array.isArray(entry.groups) ? entry.groups : [entry.groups]
+            module: moduleName,
+            professor: professorName,
+            room: roomNumber,
+            type: type,
+            groups: [group].filter(Boolean)
           };
-
-          console.log('Processed entry:', processedEntry);
-          return processedEntry;
         })
       };
 
@@ -723,7 +781,6 @@ export default function Planning() {
           console.log('Updated schedules response:', updatedResponse.data);
           
           if (updatedResponse.data.success) {
-            // Update the sectionSchedules state with the new data
             setSectionSchedules(updatedResponse.data.schedules || []);
             console.log('Schedules updated in state:', updatedResponse.data.schedules);
             
@@ -1016,6 +1073,7 @@ export default function Planning() {
   useEffect(() => {
     const fetchSchedules = async () => {
       if (!formData.section || !formData.speciality || !formData.year || !formData.semester) {
+        console.log('Missing required fields:', { formData });
         return;
       }
 
@@ -1045,9 +1103,12 @@ export default function Planning() {
           }
         });
 
+        console.log('Schedules API Response:', response.data);
+
         if (response.data.success) {
-          console.log('Fetched schedules:', response.data.schedules);
-          setSectionSchedules(response.data.schedules);
+          const schedules = response.data.schedules || [];
+          console.log('Setting schedules:', schedules);
+          setSectionSchedules(schedules);
         } else {
           console.error('Failed to fetch schedules:', response.data.message);
           toast.error(response.data.message || 'Failed to fetch schedules');
@@ -1060,6 +1121,23 @@ export default function Planning() {
 
     fetchSchedules();
   }, [formData.section, formData.speciality, formData.year, formData.semester]);
+
+  // Fetch classrooms on component mount
+  useEffect(() => {
+    const fetchClassrooms = async () => {
+      try {
+        const response = await api.get('/admin/classrooms');
+        if (response.data.success) {
+          setClassrooms(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching classrooms:', error);
+        toast.error('Failed to fetch classrooms');
+      }
+    };
+
+    fetchClassrooms();
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -1293,26 +1371,34 @@ export default function Planning() {
                     <h3 className="text-lg font-medium">Classroom Management</h3>
                     <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                       <DialogTrigger asChild>
-                        <Button className="bg-emerald-600 hover:bg-emerald-700">
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add New Classroom
+                        <Button className="flex items-center gap-2">
+                          <Plus className="h-4 w-4" />
+                          Add Classroom
                         </Button>
                       </DialogTrigger>
-                      <DialogContent className="bg-white">
+                      <DialogContent>
                         <DialogHeader>
                           <DialogTitle>Add New Classroom</DialogTitle>
                           <DialogDescription>
-                            Fill in the details for the new classroom.
+                            Create a new classroom with its details
                           </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
                           <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="name" className="text-right">Name</Label>
+                            <Input
+                              id="name"
+                              value={newClassroom.name}
+                              onChange={(e) => setNewClassroom(prev => ({ ...prev, name: e.target.value }))}
+                              className="col-span-3"
+                            />
+                          </div>
+                          <div className="grid grid-cols-4 items-center gap-4">
                             <Label htmlFor="number" className="text-right">Room Number</Label>
                             <Input
                               id="number"
-                              name="number"
                               value={newClassroom.number}
-                              onChange={handleInputChange}
+                              onChange={(e) => setNewClassroom(prev => ({ ...prev, number: e.target.value }))}
                               className="col-span-3"
                             />
                           </div>
@@ -1322,13 +1408,13 @@ export default function Planning() {
                               value={newClassroom.type}
                               onValueChange={(value) => setNewClassroom(prev => ({ ...prev, type: value }))}
                             >
-                              <SelectTrigger className="col-span-3 w-full">
+                              <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="SALLE_COURS">Salle de Cours</SelectItem>
-                                <SelectItem value="SALLE_TP">Salle TP</SelectItem>
-                                <SelectItem value="SALLE_TD">Salle TD</SelectItem>
+                                <SelectItem value="SALLE_COURS">Lecture Room</SelectItem>
+                                <SelectItem value="SALLE_TP">Lab Room</SelectItem>
+                                <SelectItem value="AMPHI">Amphitheater</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -1336,10 +1422,28 @@ export default function Planning() {
                             <Label htmlFor="capacity" className="text-right">Capacity</Label>
                             <Input
                               id="capacity"
-                              name="capacity"
                               type="number"
                               value={newClassroom.capacity}
-                              onChange={handleInputChange}
+                              onChange={(e) => setNewClassroom(prev => ({ ...prev, capacity: e.target.value }))}
+                              className="col-span-3"
+                            />
+                          </div>
+                          <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="floor" className="text-right">Floor</Label>
+                            <Input
+                              id="floor"
+                              type="number"
+                              value={newClassroom.floor}
+                              onChange={(e) => setNewClassroom(prev => ({ ...prev, floor: e.target.value }))}
+                              className="col-span-3"
+                            />
+                          </div>
+                          <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="building" className="text-right">Building</Label>
+                            <Input
+                              id="building"
+                              value={newClassroom.building}
+                              onChange={(e) => setNewClassroom(prev => ({ ...prev, building: e.target.value }))}
                               className="col-span-3"
                             />
                           </div>
@@ -2123,34 +2227,68 @@ export default function Planning() {
                       </div>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Professor</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Day</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Group</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {extractedData?.data?.scheduleEntries?.map((entry, index) => (
-                            <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
-                              <td className="px-4 py-3">{entry.modules[0]}</td>
-                              <td className="px-4 py-3">{entry.professors[0]}</td>
-                              <td className="px-4 py-3">{entry.day}</td>
-                              <td className="px-4 py-3">{entry.timeSlot}</td>
-                              <td className="px-4 py-3">{entry.type}</td>
-                              <td className="px-4 py-3">{entry.groups[0]}</td>
-                              <td className="px-4 py-3">
-                                {entry.rooms[0] ? `${entry.rooms[0].type} ${entry.rooms[0].number}` : '-'}
-                              </td>
+                      {/* Processing Information */}
+                      <div className="border-b p-4 bg-gray-50">
+                        <div className="font-medium mb-2">Processing Information</div>
+                        <div className="text-sm space-y-1">
+                          <div className="text-gray-600">
+                            <span className="font-medium">File Type:</span> {formData.fileType.toUpperCase()}
+                          </div>
+                          <div className="text-gray-600">
+                            <span className="font-medium">Total Entries:</span> {extractedData?.data?.scheduleEntries?.length || 0}
+                          </div>
+                          {extractedData?.data?.headerInfo && (
+                            <div className="text-gray-600">
+                              <span className="font-medium">Header Info:</span>
+                              <ul className="list-disc list-inside ml-2">
+                                {Object.entries(extractedData.data.headerInfo).map(([key, value]) => (
+                                  value && <li key={key}>{key}: {value}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Schedule Table */}
+                      <div className="p-4">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Day</th>
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Time Slot</th>
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Professor</th>
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Group</th>
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
+                              <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {extractedData?.data?.scheduleEntries?.map((entry, index) => {
+                              // Log each entry for debugging
+                              console.log('Rendering schedule entry:', entry);
+                              
+                              return (
+                                <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
+                                  <td className="px-4 py-3">{entry.dayOfWeek}</td>
+                                  <td className="px-4 py-3">{`${entry.startTime} - ${entry.endTime}`}</td>
+                                  <td className="px-4 py-3">{entry.moduleName || '-'}</td>
+                                  <td className="px-4 py-3">{entry.professorName || '-'}</td>
+                                  <td className="px-4 py-3">{entry.sectionName || '-'}</td>
+                                  <td className="px-4 py-3">{entry.roomNumber || '-'}</td>
+                                  <td className="px-4 py-3">{entry.roomType || '-'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        {(!extractedData?.data?.scheduleEntries || extractedData.data.scheduleEntries.length === 0) && (
+                          <div className="text-center py-8 text-gray-500">
+                            No schedule entries found in the processed file
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2438,9 +2576,8 @@ export default function Planning() {
                   </tr>
                 </thead>
                 <tbody className="[&_tr:last-child]:border-0">
-                  {Array.isArray(sectionSchedules) && sectionSchedules
-                    .filter(schedule => schedule && schedule.section === selectedSection)
-                    .map((schedule, index) => (
+                  {sectionSchedules && sectionSchedules.length > 0 ? (
+                    sectionSchedules.map((schedule, index) => (
                       <tr key={index} className="border-b transition-colors hover:bg-gray-50/50 data-[state=selected]:bg-gray-50">
                         <td className="p-4 align-middle">{schedule.day}</td>
                         <td className="p-4 align-middle">{schedule.timeSlot}</td>
@@ -2448,7 +2585,9 @@ export default function Planning() {
                         <td className="p-4 align-middle">{schedule.professor}</td>
                         <td className="p-4 align-middle">{schedule.room}</td>
                         <td className="p-4 align-middle">{schedule.type}</td>
-                        <td className="p-4 align-middle">{Array.isArray(schedule.groups) ? schedule.groups.join(', ') : ''}</td>
+                        <td className="p-4 align-middle">
+                          {Array.isArray(schedule.groups) ? schedule.groups.join(', ') : schedule.groups}
+                        </td>
                         <td className="p-4 align-middle">
                           <div className="flex gap-2">
                             <Button
@@ -2468,7 +2607,18 @@ export default function Planning() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="8" className="p-4 text-center text-gray-500">
+                        {!formData.section || !formData.speciality || !formData.year || !formData.semester ? (
+                          'Please select all required fields to view schedules'
+                        ) : (
+                          'No schedules found for the selected criteria'
+                        )}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

@@ -1,0 +1,164 @@
+[
+  {
+    "Course": "Algorithmique et Complexité\nAvancées -",
+    "Group": "G1",
+    "Room": "354",
+    "Instructor": "G",
+    "Session Type": "Unknown",
+    "Day": "Sat",
+    "Time": "08:00-09:30"
+  },
+  {
+    "Course": "Génie logiciel -",
+    "Group": "G1",
+    "Room": "354",
+    "Instructor": "BOULKRINAT\nG",
+    "Session Type": "Unknown",
+    "Day": "Sat",
+    "Time": "09:40-11:10"
+  },
+  {
+    "Course": "Algorithmique et Complexité\nAvancées\nC\nHEDJAZI-DELLAL",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Sat",
+    "Time": "13:00-14:30"
+  },
+  {
+    "Course": "Système d’Exploitation :\nSynchronisation -",
+    "Group": "G1",
+    "Room": "453",
+    "Instructor": "ZAIDI",
+    "Session Type": "Unknown",
+    "Day": "Mon",
+    "Time": "09:40-11:10"
+  },
+  {
+    "Course": "Système d’Exploitation :\nSynchronisation\nSC\nBELKHIR",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Mon",
+    "Time": "11:20-12:50"
+  },
+  {
+    "Course": "Techniques d’Optimisation\nSC\nZAIDI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Mon",
+    "Time": "13:00-14:30"
+  },
+  {
+    "Course": "Système d’Exploitation :\nSynchronisation -",
+    "Group": "G2",
+    "Room": "265",
+    "Instructor": "ZAIDI",
+    "Session Type": "Unknown",
+    "Day": "Wed",
+    "Time": "08:00-09:30"
+  },
+  {
+    "Course": "G3:TP.C8\n/ Administration et Architecture\n-- PW, FRIHI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Unknown",
+    "Day": "Wed",
+    "Time": "09:40-11:10"
+  },
+  {
+    "Course": "Système d’Exploitation :\nSynchronisation\n421T\nBELKHIR",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Wed",
+    "Time": "11:20-12:50"
+  },
+  {
+    "Course": "Administration et\nArchitecture\nF\nFRIHI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Wed",
+    "Time": "14:40-16:10"
+  },
+  {
+    "Course": "Techniques d’Optimisation -",
+    "Group": "G1",
+    "Room": "217",
+    "Instructor": "ZAIDI",
+    "Session Type": "Unknown",
+    "Day": "Thu",
+    "Time": "08:00-09:30"
+  },
+  {
+    "Course": "Techniques d’Optimisation -",
+    "Group": "G2",
+    "Room": "251",
+    "Instructor": "ZAIDI",
+    "Session Type": "Unknown",
+    "Day": "Thu",
+    "Time": "11:20-12:50"
+  },
+  {
+    "Course": "Génie logiciel\n244T\nHACHEMI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Thu",
+    "Time": "13:00-14:30"
+  },
+  {
+    "Course": "Génie logiciel\n244T\nHACHEMI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Thu",
+    "Time": "14:40-16:10"
+  },
+  {
+    "Course": "Algorithmique et Complexité\nAvancées\nR2\nHEDJAZI-DELLAL",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Unknown",
+    "Time": "08:00-09:30"
+  },
+  {
+    "Course": "Fondements de l’IA\n431T\nAZZOUNE",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Course",
+    "Day": "Unknown",
+    "Time": "09:40-11:10"
+  },
+  {
+    "Course": "G2:TP129\n/ Administration et Architecture -- PW,\nFRIHI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Unknown",
+    "Day": "Unknown",
+    "Time": "11:20-12:50"
+  },
+  {
+    "Course": "G1:TP131\n/ Administration et Architecture\n-- PW, FRIHI",
+    "Group": "",
+    "Room": "",
+    "Instructor": "",
+    "Session Type": "Unknown",
+    "Day": "Unknown",
+    "Time": "13:00-14:30"
+  }
+]

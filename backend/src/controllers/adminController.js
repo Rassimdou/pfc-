@@ -265,7 +265,15 @@ export const deleteTeacher = async (req, res) => {
         where: { id: userId },
         include: {
           refreshTokens: true,
-          surveillanceAssignments: true
+          surveillanceAssignments: true,
+          scheduleSlots: true,
+          surveillanceFiles: true,
+          verification: true,
+          pendingTeacher: true,
+          requestsA: true,
+          requestsB: true,
+          requestHistory: true,
+          swapRequests: true
         }
       });
 
@@ -282,6 +290,41 @@ export const deleteTeacher = async (req, res) => {
       // Delete related records in a transaction
       await prisma.$transaction(async (prisma) => {
         try {
+          // Delete schedule slots
+          console.log('Deleting schedule slots');
+          await prisma.scheduleSlot.deleteMany({
+            where: { ownerId: userId }
+          });
+
+          // Delete surveillance swap requests
+          console.log('Deleting surveillance swap requests');
+          await prisma.surveillanceSwapRequest.deleteMany({
+            where: { userId }
+          });
+
+          // Delete permutation requests
+          console.log('Deleting permutation requests');
+          await prisma.permutationRequest.deleteMany({
+            where: {
+              OR: [
+                { initiatorId: userId },
+                { receiverId: userId }
+              ]
+            }
+          });
+
+          // Delete request history
+          console.log('Deleting request history');
+          await prisma.requestHistory.deleteMany({
+            where: { changedById: userId }
+          });
+
+          // Delete surveillance files
+          console.log('Deleting surveillance files');
+          await prisma.surveillanceFile.deleteMany({
+            where: { userId }
+          });
+
           // Delete refresh tokens
           console.log('Deleting refresh tokens');
           await prisma.refreshToken.deleteMany({
@@ -292,6 +335,18 @@ export const deleteTeacher = async (req, res) => {
           console.log('Deleting surveillance assignments');
           await prisma.surveillanceAssignment.deleteMany({
             where: { userId }
+          });
+
+          // Delete verification records
+          console.log('Deleting verification records');
+          await prisma.verification.deleteMany({
+            where: { userId }
+          });
+
+          // Delete pending teacher records
+          console.log('Deleting pending teacher records');
+          await prisma.pendingTeacher.deleteMany({
+            where: { adminId: userId }
           });
 
           // Finally delete the user
