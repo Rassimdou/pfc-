@@ -21,6 +21,7 @@ import { isAuthenticated, isAdmin } from '../middleware/auth.js';
 import { upload, handleUploadError } from '../services/fileUploadService.js';
 import FileProcessingService from '../services/fileProcessingService.js';
 import ScheduleParser from '../utils/scheduleParser.js';
+import ExcelScheduleParser from '../utils/ExcelScheduleParser.js';
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -47,7 +48,12 @@ const uploadMulter = multer({
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/msword',
       'application/octet-stream',
-      'application/pdf'
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/excel',
+      'application/x-excel',
+      'application/x-msexcel'
     ];
 
     console.log('File upload details:', {
@@ -56,10 +62,10 @@ const uploadMulter = multer({
       extension: fileExtension
     });
 
-    if (fileExtension === '.docx' || fileExtension === '.pdf' || validMimeTypes.includes(file.mimetype)) {
+    if (fileExtension === '.docx' || fileExtension === '.pdf' || fileExtension === '.xlsx' || fileExtension === '.xls' || validMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only Microsoft Word (.docx) and PDF (.pdf) files are allowed'));
+      cb(new Error('Only Microsoft Word (.docx), PDF (.pdf), and Excel (.xlsx/.xls) files are allowed'));
     }
   },
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
@@ -714,6 +720,93 @@ router.post('/extract-schedule', authenticate, upload.single('file'), handleUplo
   }
 });
 
+// Excel schedule extraction route
+router.post('/extract-excel', authenticate, uploadMulter.single('file'), async (req, res) => {
+  let uploadedFile = null;
+  try {
+    if (!req.file) {
+      console.error('No file uploaded');
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded',
+        error: 'No file was provided in the request'
+      });
+    }
+
+    uploadedFile = req.file;
+    console.log('Processing Excel file:', {
+      path: uploadedFile.path,
+      originalname: uploadedFile.originalname,
+      mimetype: uploadedFile.mimetype,
+      size: uploadedFile.size
+    });
+
+    // Verify file exists
+    try {
+      await fs.promises.access(uploadedFile.path);
+      console.log('File exists and is accessible');
+    } catch (error) {
+      console.error('File not found or not accessible:', error);
+      return res.status(400).json({
+        success: false,
+        message: 'File not found or not accessible',
+        error: error.message
+      });
+    }
+
+    // Read the file buffer
+    const fileBuffer = await fs.promises.readFile(uploadedFile.path);
+
+    // Process the Excel file
+    console.log('Starting Excel file processing');
+    const result = await ExcelScheduleParser.parseExcelFile(fileBuffer);
+    console.log('Excel file processing completed:', {
+      success: result.success,
+      hasData: !!result.data,
+      error: result.error
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to process Excel file',
+        error: result.error,
+        details: result.details
+      });
+    }
+
+    // Format the data for database
+    const formattedData = ExcelScheduleParser.formatForDatabase(result.data);
+
+    res.json({
+      success: true,
+      data: formattedData
+    });
+
+  } catch (error) {
+    console.error('Error processing Excel file:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while processing Excel file',
+      error: error.message,
+      details: {
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } finally {
+    // Clean up the uploaded file
+    if (uploadedFile?.path) {
+      try {
+        await fs.promises.unlink(uploadedFile.path);
+        console.log('Uploaded file cleaned up successfully');
+      } catch (error) {
+        console.error('Error cleaning up file:', error);
+      }
+    }
+  }
+});
+
 // Function to create user schedules based on section schedules
 async function createUserSchedules(scheduleData, year, semester) {
   try {
@@ -897,7 +990,7 @@ router.post('/import-specialities', isAuthenticated, isAdmin, upload.single('fil
         console.log('Found or created palier:', palierRecord);
 
         // Then find or create the year using the palier ID
-        const year = await prisma.year.upsert({
+        const yearRecord = await prisma.year.upsert({
           where: {
             name_palierId: {
               name: String(palier),
@@ -911,7 +1004,7 @@ router.post('/import-specialities', isAuthenticated, isAdmin, upload.single('fil
           }
         });
 
-        console.log('Found or created year:', year);
+        console.log('Found or created year:', yearRecord);
 
         // Then find or create speciality using the year ID
         const specialityRecord = await prisma.speciality.upsert({
@@ -919,14 +1012,14 @@ router.post('/import-specialities', isAuthenticated, isAdmin, upload.single('fil
             name_palierId_yearId: {
               name: speciality,
               palierId: palierRecord.id,
-              yearId: year.id
+              yearId: yearRecord.id
             }
           },
           update: {},
           create: {
             name: speciality,
             palierId: palierRecord.id,
-            yearId: year.id
+            yearId: yearRecord.id
           }
         });
 
@@ -1191,7 +1284,7 @@ router.post('/schedules/section', authenticate, async (req, res) => {
     console.log('Found or created palier:', palierRecord);
 
     // Then find or create the year using the palier ID
-    const year = await prisma.year.upsert({
+    const yearRecord = await prisma.year.upsert({
       where: {
         name_palierId: {
           name: String(academicYear),
@@ -1205,45 +1298,58 @@ router.post('/schedules/section', authenticate, async (req, res) => {
       }
     });
 
-    console.log('Found or created year:', year);
+    console.log('Found or created year:', yearRecord);
 
     // Then find or create speciality using the year ID
-    const speciality = await prisma.speciality.upsert({
+    const specialityRecord = await prisma.speciality.upsert({
       where: {
         name_palierId_yearId: {
           name: specialityName,
           palierId: palierRecord.id,
-          yearId: year.id
+          yearId: yearRecord.id
         }
       },
       update: {},
       create: {
         name: specialityName,
         palierId: palierRecord.id,
-        yearId: year.id
+        yearId: yearRecord.id
       }
     });
 
-    console.log('Found or created speciality:', speciality);
+    console.log('Found or created speciality:', specialityRecord);
 
      const module = await prisma.module.upsert({
-        where: { code: moduleName, academicYear: parseInt(academicYear) }, // Assuming moduleName is code or unique identifier
+        where: { code: moduleName, academicYear: parseInt(academicYear) },
         update: {},
         create: {
             code: moduleName,
-            name: moduleName, // Or infer name if code is used
+            name: moduleName,
             academicYear: parseInt(academicYear),
-            palierId: speciality.palierId, // Inherit from speciality
-            yearId: year.id, // Link to year record
+            palierId: specialityRecord.palierId,
+            yearId: yearRecord.id,
             semestre: semester.toUpperCase(),
-            specialityId: speciality.id,
+            specialityId: specialityRecord.id,
         }
     });
 
     const section = await prisma.section.upsert({
-        where: { name: sectionName, moduleId: module.id, academicYear: parseInt(academicYear) },
-        update: {},
-        create: { name: sectionName, moduleId: module.id, academicYear: parseInt(academicYear) }
+      where: {
+        name_moduleId_academicYear: {
+          name: sectionName,
+          moduleId: module.id,
+          academicYear: parseInt(academicYear)
+        }
+      },
+      update: {
+        yearId: yearRecord.id
+      },
+      create: {
+        name: sectionName,
+        moduleId: module.id,
+        academicYear: parseInt(academicYear),
+        yearId: yearRecord.id
+      }
     });
 
     const professor = await prisma.user.upsert({
@@ -1394,10 +1500,8 @@ router.post('/schedules/section/bulk', async (req, res) => {
       }
     });
 
-    console.log('Found or created palier:', palierRecord);
-
     // Then find or create the year using the palier ID
-    const year = await prisma.year.upsert({
+    const yearRecord = await prisma.year.upsert({
       where: {
         name_palierId: {
           name: String(academicYear),
@@ -1411,26 +1515,22 @@ router.post('/schedules/section/bulk', async (req, res) => {
       }
     });
 
-    console.log('Found or created year:', year);
-
     // Then find or create speciality using the year ID
-    const speciality = await prisma.speciality.upsert({
+    const specialityRecord = await prisma.speciality.upsert({
       where: {
         name_palierId_yearId: {
           name: specialityName,
           palierId: palierRecord.id,
-          yearId: year.id
+          yearId: yearRecord.id
         }
       },
       update: {},
       create: {
         name: specialityName,
         palierId: palierRecord.id,
-        yearId: year.id
+        yearId: yearRecord.id
       }
     });
-
-    console.log('Found or created speciality:', speciality);
 
     // Process each schedule entry
     let totalEntries = 0;
@@ -1440,86 +1540,103 @@ router.post('/schedules/section/bulk', async (req, res) => {
     for (const entry of scheduleEntries) {
       try {
         console.log('Processing entry:', entry);
+        console.log('Schedule entry data:', entry);
 
         // Find or create module
         const module = await prisma.module.upsert({
           where: {
-            name: entry.module
+            code_academicYear: {
+              code: entry.moduleName || 'UNKNOWN',
+              academicYear: parseInt(academicYear)
+            }
           },
-          update: {},
+          update: {
+            name: entry.moduleName || 'Unknown Module',
+            specialityId: specialityRecord.id,
+            yearId: yearRecord.id,
+            palierId: palierRecord.id,
+            semestre: semester.toUpperCase()
+          },
           create: {
-            name: entry.module,
-            code: entry.module,
-            specialityId: speciality.id,
-            yearId: year.id,
-            semester: semester.toUpperCase()
+            code: entry.moduleName || 'UNKNOWN',
+            name: entry.moduleName || 'Unknown Module',
+            academicYear: parseInt(academicYear),
+            specialityId: specialityRecord.id,
+            yearId: yearRecord.id,
+            palierId: palierRecord.id,
+            semestre: semester.toUpperCase()
           }
         });
-
-        console.log('Found/created module:', module);
 
         // Find or create section
         const section = await prisma.section.upsert({
           where: {
-            name_specialityId: {
+            name_moduleId_academicYear: {
               name: sectionName,
-              specialityId: speciality.id
+              moduleId: module.id,
+              academicYear: parseInt(academicYear)
             }
           },
-          update: {},
+          update: {
+            yearId: yearRecord.id
+          },
           create: {
             name: sectionName,
-            specialityId: speciality.id,
-            yearId: year.id
+            moduleId: module.id,
+            academicYear: parseInt(academicYear),
+            yearId: yearRecord.id
           }
         });
-
-        console.log('Found/created section:', section);
 
         // Find or create professor
-        const professor = await prisma.professor.upsert({
+        const professor = await prisma.user.upsert({
           where: {
-            name: entry.professor
+            email: `${(entry.professorName || 'TBA').toLowerCase().replace(/\s+/g, '.')}@example.com`
           },
-          update: {},
+          update: {
+            name: entry.professorName || 'TBA',
+            role: 'PROFESSOR'
+          },
           create: {
-            name: entry.professor,
-            email: `${entry.professor.toLowerCase().replace(/\s+/g, '.')}@univ.com`
+            email: `${(entry.professorName || 'TBA').toLowerCase().replace(/\s+/g, '.')}@example.com`,
+            name: entry.professorName || 'TBA',
+            role: 'PROFESSOR',
+            isVerified: true
           }
         });
-
-        console.log('Found/created professor:', professor);
 
         // Find or create room
         const room = await prisma.room.upsert({
           where: {
-            number: entry.room
+            name: entry.roomNumber || 'TBA'
           },
-          update: {},
+          update: {
+            type: entry.roomType || 'SALLE_COURS'
+          },
           create: {
-            number: entry.room,
-            type: 'SALLE_COURS',
-            capacity: 30
+            name: entry.roomNumber || 'TBA',
+            type: entry.roomType || 'SALLE_COURS',
+            capacity: 30 // Default capacity
           }
         });
-
-        console.log('Found/created room:', room);
 
         // Create schedule slot
         const scheduleSlot = await prisma.scheduleSlot.create({
           data: {
-            day: entry.day,
-            timeSlot: entry.timeSlot,
-            type: entry.type || 'COURSE',
+            dayOfWeek: entry.dayOfWeek,
+            startTime: entry.startTime,
+            endTime: entry.endTime,
+            isAvailable: false, // Assuming imported slots are not immediately available for swap
+            ownerId: professor.id,
             moduleId: module.id,
-            professorId: professor.id,
-            roomId: room.id,
             sectionId: section.id,
-            groups: entry.groups || []
+            roomId: room.id,
+            // Include group and type if available and needed in ScheduleSlot model
+            // group: entry.groups?.join(','), // if groups is an array and needed
+            // type: entry.type, // if type is available and needed
           }
         });
 
-        console.log('Created schedule slot:', scheduleSlot);
         successfulEntries++;
       } catch (error) {
         console.error('Error processing entry:', error);

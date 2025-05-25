@@ -11,72 +11,85 @@ import cookieParser from 'cookie-parser';
 import surveillanceRoutes from './src/routes/surveillanceRoutes.js';
 import swapRoutes from './src/routes/swapRoutes.js'
 import notificationRoutes from './src/routes/notificationRoutes.js';
+
 const prisma = new PrismaClient();
 dotenv.config();
+
 const app = express();
 
-//middleware
+// Middleware
 app.use(express.json());
-app.use(express.urlencoded({ extended:true }));
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'keyboard cat',
-  resave: false,
-  saveUninitialized: true,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    sameSite: 'lax'
-  }
-}));
-app.use(passport.initialize());
-app.use(passport.session());
 
 // CORS configuration
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-    exposedHeaders: ['Set-Cookie'],
-    maxAge: 86400 // 24 hours
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', process.env.FRONTEND_URL].filter(Boolean),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Set-Cookie']
 }));
 
 // Add request logging middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-    console.log('Headers:', req.headers);
-    console.log('Cookies:', req.cookies);
-    next();
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
 });
 
-//test database connection
-// const users = await prisma.user.findMany(); // Commented out potentially blocking code
-// console.log(users); // Commented out
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
 
-app.get('/test-db', async (req , res)=>{
-    try {
-        const connection = await pool.getConnection();
-        const [rows] = await connection.query('SELECT 1 + 1 AS ssolution');
-        connection.release();
-        res.json({message : 'Database connection successfully' , result :rows[0].solution});
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
 
-    } catch (error) {
-        console.error('Database connection failed:', error);
-        res.status(500).json({error : 'Database connection failed'});
-    }
-}) 
-
-
-app.use('/api/auth', authRoutes);  // Adds /api prefix
+// Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/surveillance', surveillanceRoutes);
 app.use('/api/swap', swapRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/uploads/surveillance', express.static('uploads/surveillance'));
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+// Start server
 const PORT = process.env.PORT || 5000;
+const HOST = '0.0.0.0'; // Listen on all network interfaces
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+// Add a test route before starting the server
+app.get('/test', (req, res) => {
+  res.json({ message: 'Server is running', timestamp: new Date().toISOString() });
+});
+
+app.listen(PORT, HOST, () => {
+  console.log('=================================');
+  console.log(`Server is running on:`);
+  console.log(`- Local:   http://localhost:${PORT}`);
+  console.log(`- Network: http://${HOST}:${PORT}`);
+  console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+  console.log(`API URL: ${process.env.API_URL || 'http://localhost:5000'}`);
+  console.log('=================================');
 });

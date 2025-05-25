@@ -13,6 +13,7 @@ except ImportError:
     print("pip install PyPDF2 pdfplumber")
     sys.exit(1)
 
+GEMINI_API_KEY=your_api_key_here
 
 class UniversalScheduleExtractor:
     def __init__(self):
@@ -153,7 +154,7 @@ class UniversalScheduleExtractor:
             }
 
             # Pattern 1: G<group>:<room> / <course> -- <type>, <professor> or G<group> / <course> -- <type>, <professor>
-            match = re.match(r"(G\d+)(?::(\d+[A-Z]?))?\s*/\s*([A-Za-zÀ-ÿ’'\":,\-/\s]+?)\s*--\s*([A-Za-z]+)(?:,?\s*([A-Za-zÀ-ÿ\s-]+))?", s_block, re.UNICODE)
+            match = re.match(r"(G\d+)(?::(\d+[A-Z]?))?\s*/\s*([A-Za-zÀ-ÿ'':,\-/\s]+?)\s*--\s*([A-Za-z]+)(?:,?\s*([A-Za-zÀ-ÿ\s-]+))?", s_block, re.UNICODE)
             if match:
                 session["group"] = match.group(1).strip()
                 session["room"] = match.group(2).strip() if match.group(2) else None
@@ -164,7 +165,7 @@ class UniversalScheduleExtractor:
                 continue
 
             # Pattern 2: <course> course <room/type> <professor>
-            match = re.match(r"([A-Za-zÀ-ÿ’'\":,\-/\s]+?)\s*course\s*([A-Za-z0-9\.]+)?\s*([A-Za-zÀ-ÿ\s-]+)?", s_block, re.UNICODE)
+            match = re.match(r"([A-Za-zÀ-ÿ'':,\-/\s]+?)\s*course\s*([A-Za-z0-9\.]+)?\s*([A-Za-zÀ-ÿ\s-]+)?", s_block, re.UNICODE)
             if match:
                 session["course"] = match.group(1).strip()
                 potential_type_room = match.group(2).strip() if match.group(2) else None
@@ -182,7 +183,7 @@ class UniversalScheduleExtractor:
                 continue
 
             # Pattern 3: <course>: <synchronization type> -- <type>, <professor>
-            match = re.match(r"([A-Za-zÀ-ÿ’'\":,\-/\s]+?):\s*([A-Za-zÀ-ÿ’'\":,\-/\s]+?)\s*--\s*([A-Za-z]+)(?:,?\s*([A-Za-zÀ-ÿ\s-]+))?", s_block, re.UNICODE)
+            match = re.match(r"([A-Za-zÀ-ÿ'':,\-/\s]+?):\s*([A-Za-zÀ-ÿ'':,\-/\s]+?)\s*--\s*([A-Za-z]+)(?:,?\s*([A-Za-zÀ-ÿ\s-]+))?", s_block, re.UNICODE)
             if match:
                 session["course"] = f"{match.group(1).strip()}: {match.group(2).strip()}"
                 session["type"] = self._normalize_type(match.group(3))
@@ -200,7 +201,7 @@ class UniversalScheduleExtractor:
                 continue
             
             # Pattern 5: Course with only type/room and professor, potentially without explicit "course"
-            match = re.match(r"([A-Za-zÀ-ÿ’'\":,\-/\s]+?)\s*([A-Za-z0-9\.]+)\s*([A-Za-zÀ-ÿ\s-]+)", s_block, re.UNICODE)
+            match = re.match(r"([A-Za-zÀ-ÿ'':,\-/\s]+?)\s*([A-Za-z0-9\.]+)\s*([A-Za-zÀ-ÿ\s-]+)", s_block, re.UNICODE)
             if match:
                 session["course"] = match.group(1).strip()
                 potential_type_room = match.group(2).strip()

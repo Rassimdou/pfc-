@@ -528,7 +528,7 @@ export default function Planning() {
     setIsDeleteModuleDialogOpen(false);
   };
 
-  // Update file upload handler to handle both DOCX and PDF files
+  // Update file upload handler to handle DOCX, PDF, and Excel files
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -540,8 +540,8 @@ export default function Planning() {
 
       // Check file extension
       const fileExtension = file.name.split('.').pop().toLowerCase();
-      if (!['docx', 'pdf'].includes(fileExtension)) {
-        setError('Please upload a .docx or .pdf file');
+      if (!['docx', 'pdf', 'xlsx', 'xls'].includes(fileExtension)) {
+        setError('Please upload a .docx, .pdf, or Excel (.xlsx/.xls) file');
         setSelectedFile(null);
         return;
       }
@@ -559,7 +559,16 @@ export default function Planning() {
           'application/msword',
           'application/octet-stream'
         ],
-        'pdf': ['application/pdf']
+        'pdf': ['application/pdf'],
+        'xlsx': [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/octet-stream'
+        ],
+        'xls': [
+          'application/vnd.ms-excel',
+          'application/octet-stream'
+        ]
       };
 
       if (!validMimeTypes[fileExtension].includes(file.type)) {
@@ -607,7 +616,7 @@ export default function Planning() {
     return Object.keys(errors).length === 0;
   };
 
-  // Update handleProcessFile to use the new logging
+  // Update handleProcessFile to use the correct endpoint based on file type
   const handleProcessFile = async () => {
     try {
       setIsProcessing(true);
@@ -625,8 +634,16 @@ export default function Planning() {
 
       addProcessingLog(`Uploading ${formData.fileType.toUpperCase()} file...`, 'info');
 
+      // Determine the endpoint based on file type
+      let endpoint = '/admin/extract-schedule';
+      if (formData.fileType === 'xlsx' || formData.fileType === 'xls') {
+        endpoint = '/admin/extract-excel';
+      } else if (formData.fileType === 'pdf') {
+        endpoint = '/admin/extract-pdf';
+      }
+
       const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/admin/extract-schedule`,
+        `${import.meta.env.VITE_API_URL}${endpoint}`,
         formDataToSend,
         {
           headers: {
@@ -687,9 +704,20 @@ export default function Planning() {
         return;
       }
 
+      // Validate only the essential form fields
+      if (!formData.speciality || !formData.year || !formData.semester || !formData.section) {
+        toast.error('Please fill in all required fields (Speciality, Year, Semester, Section)');
+        return;
+      }
+
       console.log('Starting import process...');
-      console.log('Extracted data:', extractedData);
-      console.log('Form data:', formData);
+      console.log('Form data:', {
+        speciality: formData.speciality,
+        year: formData.year,
+        semester: formData.semester,
+        section: formData.section
+      });
+      console.log('Raw extracted data:', extractedData);
 
       if (!extractedData?.data?.scheduleEntries || !Array.isArray(extractedData.data.scheduleEntries)) {
         console.error('Invalid extracted data structure:', extractedData);
@@ -707,7 +735,7 @@ export default function Planning() {
       // Log the first entry to verify structure
       console.log('First schedule entry:', scheduleEntries[0]);
 
-      // Prepare the data for saving
+      // Prepare the data for saving with more flexible field handling
       const scheduleData = {
         specialityName: formData.speciality,
         academicYear: parseInt(formData.year),
@@ -716,51 +744,73 @@ export default function Planning() {
         scheduleEntries: scheduleEntries.map(entry => {
           console.log('Processing entry:', entry);
           
-          // Extract module name from content
+          // Extract module name from content with fallback
           const moduleMatch = entry.content?.match(/([^/]+)(?:\s*--\s*[A-Z]+)?/);
-          const moduleName = moduleMatch ? moduleMatch[1].trim() : '';
+          const moduleName = moduleMatch ? moduleMatch[1].trim() : entry.moduleName || 'Unknown Module';
           
-          // Extract professor name
+          // Extract professor name with fallback
           const professorMatch = entry.content?.match(/([A-Z-]+)$/);
-          const professorName = professorMatch ? professorMatch[1].trim() : '';
+          const professorName = professorMatch ? professorMatch[1].trim() : entry.professorName || 'TBA';
           
-          // Extract room number
+          // Extract room number with fallback
           const roomMatch = entry.content?.match(/(?:G\d+:)?(\d+[A-Z]?|[A-Z]\d+)/);
-          const roomNumber = roomMatch ? roomMatch[1].trim() : '';
+          const roomNumber = roomMatch ? roomMatch[1].trim() : entry.roomNumber || 'TBA';
           
-          // Extract group
+          // Extract group with fallback
           const groupMatch = entry.content?.match(/G\d+/);
-          const group = groupMatch ? groupMatch[0] : '';
+          const group = groupMatch ? groupMatch[0] : entry.groups?.[0] || '';
           
-          // Determine type
+          // Determine type with fallback
           const type = entry.content?.includes('course') ? 'COURSE' : 
                       entry.content?.includes('DW') ? 'TD' : 
-                      entry.content?.includes('PW') ? 'TP' : 'OTHER';
+                      entry.content?.includes('PW') ? 'TP' : 
+                      entry.type || 'COURSE';
 
-          return {
-            day: entry.day,
-            timeSlot: entry.timeSlot,
-            module: moduleName,
-            professor: professorName,
-            room: roomNumber,
-            type: type,
+          // Ensure day and timeSlot have fallbacks
+          const day = entry.day || 'MONDAY';
+          const timeSlot = entry.timeSlot || '08:00-09:30';
+
+          // Split timeSlot into start and end times
+          const [startTime, endTime] = timeSlot.split('-').map(t => t.trim());
+
+          const processedEntry = {
+            dayOfWeek: day,
+            startTime: startTime || '08:00',
+            endTime: endTime || '09:30',
+            moduleName: moduleName,
+            professorName: professorName,
+            roomNumber: roomNumber,
+            roomType: type,
             groups: [group].filter(Boolean)
           };
+
+          console.log('Processed entry:', processedEntry);
+          return processedEntry;
         })
       };
 
-      console.log('Sending schedule data to server:', scheduleData);
+      console.log('Final schedule data being sent to server:', scheduleData);
 
-      const response = await api.post('/admin/schedules/section/bulk', scheduleData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      const importResponse = await axios.post(
+        `${import.meta.env.VITE_API_URL}/admin/schedules/section/bulk`,
+        {
+          specialityName: formData.speciality,
+          academicYear: formData.year,
+          semester: formData.semester,
+          sectionName: formData.section,
+          scheduleEntries: scheduleEntries,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
         }
-      });
-      
-      console.log('Server response:', response.data);
+      );
 
-      if (response.data.success) {
+      console.log('Import response:', importResponse.data);
+
+      if (importResponse.data.success) {
         toast.success('Schedule imported successfully');
         
         // Immediately fetch the updated schedules
@@ -801,20 +851,22 @@ export default function Planning() {
             if (sectionSchedulesTab) {
               sectionSchedulesTab.click();
             }
-          } else {
-            console.error('Failed to fetch updated schedules:', updatedResponse.data.message);
-            toast.error('Schedule saved but failed to refresh view');
           }
-        } catch (fetchError) {
-          console.error('Error fetching updated schedules:', fetchError);
-          toast.error('Schedule saved but failed to refresh view');
+        } catch (error) {
+          console.error('Error fetching updated schedules:', error);
+          toast.error('Schedule imported but failed to refresh the view');
         }
       } else {
-        console.error('Server returned error:', response.data);
-        toast.error(response.data.message || 'Failed to import schedule');
+        console.error('Server returned error:', importResponse.data);
+        toast.error(importResponse.data.message || 'Failed to import schedule');
       }
     } catch (error) {
       console.error('Error importing schedule:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       toast.error(error.response?.data?.message || 'Failed to import schedule');
     }
   };
@@ -1266,6 +1318,8 @@ export default function Planning() {
                       <SelectContent>
                         <SelectItem value="docx">Word Document</SelectItem>
                         <SelectItem value="pdf">PDF Document</SelectItem>
+                        <SelectItem value="xlsx">Excel Document</SelectItem>
+                        <SelectItem value="xls">Excel Document (Legacy)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1289,14 +1343,14 @@ export default function Planning() {
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileUpload}
-                    accept=".docx,.pdf"
+                    accept=".docx,.pdf,.xlsx,.xls"
                     className="hidden"
                     disabled={!formData.semester || !formData.year || !formData.speciality || !formData.section}
                   />
                   <Button 
                     className="bg-emerald-600 hover:bg-emerald-700"
                     onClick={handleBrowseClick}
-                    disabled={!formData.semester || !formData.year || !formData.speciality || !formData.section}
+                    disabled={isProcessing || !formData.semester || !formData.year || !formData.speciality || !formData.section}
                   >
                     {isProcessing ? 'Processing...' : 'Browse Files'}
                   </Button>

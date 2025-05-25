@@ -8,7 +8,7 @@ const { PrismaClient } = require('@prisma/client');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const surveillanceRoutes = require('./routes/surveillanceRoutes');
-const scheduleRoutes = require('./routes/scheduleRoutes');
+import scheduleRoutes from './routes/scheduleRoutes.js';
 const adminRoutes = require('./routes/adminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 

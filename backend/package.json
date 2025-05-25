@@ -7,6 +7,8 @@
     "start": "node app.js"
   },
   "dependencies": {
+    "@google-cloud/aiplatform": "^4.2.0",
+    "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.10.0",
     "bcrypt": "^5.1.1",
     "cheerio": "^1.0.0",
@@ -15,6 +17,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "express-session": "^1.18.0",
+    "google-auth-library": "^9.15.1",
     "jsdom": "^26.1.0",
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
@@ -31,6 +34,7 @@
     "sharp": "^0.34.2",
     "tesseract.js": "^6.0.1",
     "textract": "^2.5.0",
+    "USTHB-Xchange-backend": "file:",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

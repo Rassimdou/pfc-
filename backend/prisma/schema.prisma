@@ -254,19 +254,21 @@ model SurveillanceFile {
 
 // --- Remaining Models ---
 model Section {
-  id              Int            @id @default(autoincrement())
-  name            String
-  academicYear    Int
-  palier          Palier?        @relation(fields: [palierId], references: [id])
-  palierId        Int?
-  year            Year?          @relation(fields: [yearId], references: [id])
-  yearId          Int?
-  module          Module         @relation(fields: [moduleId], references: [id])
-  moduleId        Int
-  slots           ScheduleSlot[]
+  id            Int            @id @default(autoincrement())
+  name          String
+  academicYear  Int
+  palier        Palier?        @relation(fields: [palierId], references: [id])
+  palierId      Int?
+  year          Year?          @relation(fields: [yearId], references: [id])
+  yearId        Int?
+  module        Module         @relation(fields: [moduleId], references: [id])
+  moduleId      Int
+  slots         ScheduleSlot[]
 
-  @@index([moduleId, academicYear])
+  @@unique([name, moduleId, academicYear])
+  @@index([moduleId])
   @@index([yearId])
+  @@index([palierId])
 }
 
 model PermutationRequest {
