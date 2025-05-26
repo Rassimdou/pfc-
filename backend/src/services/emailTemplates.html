@@ -1,12 +1,33 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USTHB Platform Invitation</title>
     <style>
-        body { margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
-        .header { background-color: #059669; padding: 2rem; text-align: center; }
-        .logo { height: 40px; }
-        .content { padding: 2rem; color: #374151; }
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: #f4f4f4;
+        }
+        .container { 
+            max-width: 600px; 
+            margin: 20px auto; 
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header { 
+            background-color: #059669; 
+            padding: 2rem; 
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+        }
+        .content { 
+            padding: 2rem; 
+            color: #374151;
+        }
         .button { 
             display: inline-block; 
             padding: 12px 24px;
@@ -16,6 +37,7 @@
             border-radius: 4px;
             margin: 1.5rem 0;
             font-weight: 500;
+            text-align: center;
         }
         .footer { 
             padding: 1.5rem;
@@ -24,27 +46,46 @@
             font-size: 0.875rem;
             border-top: 1px solid #e5e7eb;
         }
+        .security-note {
+            background-color: #f0fdf4;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border: 1px solid #059669;
+        }
+        .link {
+            color: #059669;
+            text-decoration: none;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <img src="https://your-cdn.com/uniswap-logo-white.png" alt="UniSwap Logo" class="logo">
+            <h1 style="color: white; margin: 0;">Welcome to USTHB Platform</h1>
         </div>
         
         <div class="content">
-            <h2 style="color: #059669; margin-bottom: 1rem;">Welcome to UniSwap, Professor!</h2>
+            <h2 style="color: #059669; margin-bottom: 1rem;">Welcome to USTHB Platform!</h2>
             
             <p>You've been invited to join the University Hour Management System. Please click the button below to complete your registration:</p>
             
-            <a href="{{registrationLink}}" class="button">Complete Registration</a>
+            <div style="text-align: center;">
+                <a href="{{invitationLink}}" class="button">Complete Registration</a>
+            </div>
             
-            <p style="margin-bottom: 0.5rem;">This secure link will expire in <strong>24 hours</strong>.</p>
+            <div class="security-note">
+                <p><strong>Important:</strong> If the button above doesn't work, you can copy and paste this link into your browser:</p>
+                <p><a href="{{invitationLink}}" class="link">{{invitationLink}}</a></p>
+                <p>This secure link will expire in <strong>24 hours</strong>.</p>
+            </div>
+            
             <p>If you didn't request this invitation, please ignore this email.</p>
         </div>
         
         <div class="footer">
-            <p>© {{year}} UniSwap - University of Science and Technology HB<br>
+            <p>© {{currentYear}} USTHB - University of Science and Technology HB<br>
             All rights reserved</p>
         </div>
     </div>

@@ -244,8 +244,18 @@ export const loginWithPassword = async (req, res) => {
     });
 
     console.log('User found:', user ? 'Yes' : 'No');
+    if (user) {
+      console.log('User details:', {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+        hasPassword: !!user.password
+      });
+    }
 
     if (!user || !user.password) {
+      console.log('User not found or has no password');
       // Simulate password hash comparison time to prevent timing attacks
       await bcrypt.hash(password, SALT_ROUNDS);
       return res.status(401).json({
@@ -258,6 +268,7 @@ export const loginWithPassword = async (req, res) => {
     console.log('Password valid:', isValid);
 
     if (!isValid) {
+      console.log('Password validation failed');
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -318,13 +329,37 @@ export const completeGoogleSignup = async (req, res) => {
       });
     }
 
-    const user = await prisma.user.update({
-      where: { email },
-      data: {
+    // Check if email is authorized
+    const pendingTeacher = await prisma.pendingTeacher.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (!pendingTeacher) {
+      return res.status(403).json({
+        success: false,
+        message: 'Email not authorized'
+      });
+    }
+
+    // Create or update user
+    const user = await prisma.user.upsert({
+      where: { email: email.toLowerCase() },
+      update: {
         firstName,
         lastName,
         phoneNumber,
-        name: `${firstName} ${lastName}`
+        name: `${firstName} ${lastName}`,
+        isVerified: true
+      },
+      create: {
+        email: email.toLowerCase(),
+        firstName,
+        lastName,
+        phoneNumber,
+        name: `${firstName} ${lastName}`,
+        role: 'PROFESSOR',
+        isVerified: true,
+        department: pendingTeacher.department
       },
       select: {
         id: true,
@@ -334,6 +369,11 @@ export const completeGoogleSignup = async (req, res) => {
         lastName: true,
         phoneNumber: true
       }
+    });
+
+    // Delete the pending teacher record since they are now active
+    await prisma.pendingTeacher.delete({
+      where: { email: email.toLowerCase() }
     });
 
     const token = jwt.sign(
@@ -358,7 +398,8 @@ export const completeGoogleSignup = async (req, res) => {
     console.error('Google signup completion error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to complete signup'
+      message: 'Failed to complete signup',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

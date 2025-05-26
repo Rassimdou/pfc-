@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs"
-import { Calendar, Clock, Users, Bell, Settings, BookOpen, ArrowLeftRight, CheckCircle, XCircle } from "lucide-react"
+import { Calendar, Clock, Users, Bell, Settings, BookOpen, ArrowLeftRight, CheckCircle, XCircle, User, LogOut } from "lucide-react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
@@ -63,7 +63,14 @@ export default function Dashboard() {
         const processedNotifications = notificationsRes.data.map(notification => ({
           ...notification,
           isSender: notification.type === 'SWAP_REQUEST' && notification.details?.fromUserId === user?.id
-        }));
+        })).filter(notification => {
+          // Keep all notifications except swap requests where user is sender
+          // But allow swap acceptance notifications for the sender
+          if (notification.type === 'SWAP_REQUEST') {
+            return !notification.isSender || notification.status === 'ACCEPTED';
+          }
+          return true;
+        });
         
         // Process swap requests
         const processedSwaps = swapsRes.data.map(swap => ({
@@ -71,7 +78,7 @@ export default function Dashboard() {
           isSender: swap.userId === user?.id,
           senderName: swap.fromAssignment?.user?.name || 'Unknown',
           receiverName: swap.toAssignment?.user?.name || 'Unknown'
-        }));
+        })).filter(swap => !swap.isSender); // Filter out swaps where user is sender
 
         setNotifications(processedNotifications);
         setPendingSwaps(processedSwaps);
@@ -175,6 +182,14 @@ export default function Dashboard() {
     return assignmentDate >= now && assignmentDate <= tomorrow;
   });
 
+  // Add handleLogout function
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login');
+    toast.success('Logged out successfully');
+  };
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b bg-white">
@@ -261,6 +276,25 @@ export default function Dashboard() {
             <Button variant="ghost" size="icon">
               <Settings className="h-5 w-5" />
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                  <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-medium">
+                    {user?.firstName?.[0]}{user?.lastName?.[0]}
+                  </div>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuItem onClick={() => navigate('/user/profile')}>
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div className="flex items-center gap-2">
               <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-medium">
                 {user?.firstName?.[0]}{user?.lastName?.[0]}

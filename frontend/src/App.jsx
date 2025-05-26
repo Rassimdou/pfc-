@@ -15,6 +15,7 @@ import EmailVerification from './EmailVerification.jsx';
 import Surveillance from './user/Surveillance';
 import SurveillanceManagement from './admin/surveillance';
 import ExchangeHistory from './admin/exchanges';
+import UserProfile from './user/profile';
 import { Toaster } from 'react-hot-toast';
 
 
@@ -39,6 +40,7 @@ function App() {
           <Route index element={<Navigate to="/user/page" replace />} />
           <Route path="page" element={<Dashboard />} />
           <Route path="surveillance" element={<Surveillance />} />
+          <Route path="profile" element={<UserProfile />} />
         </Route>
         
         {/* Admin routes */}

@@ -3,16 +3,21 @@ import axios from 'axios';
 // Get the API URL from environment variables or use default
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-console.log('Initializing axios with API URL:', API_URL);
+// Ensure API_URL doesn't end with a slash
+const cleanApiUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
+
+console.log('Initializing axios with API URL:', cleanApiUrl);
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: `${cleanApiUrl}/api`,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   },
   withCredentials: true,
-  timeout: 10000 // 10 seconds timeout
+  timeout: 15000, // Increased timeout to 15 seconds
+  retry: 3, // Number of retries
+  retryDelay: 1000 // Delay between retries in milliseconds
 });
 
 // Request interceptor
@@ -61,7 +66,21 @@ api.interceptors.response.use(
     
     if (error.code === 'ERR_NETWORK') {
       console.error('Network error - unable to reach the server at:', errorDetails.fullUrl);
-      // Try to ping the server
+      
+      // Check if we should retry
+      const config = error.config;
+      if (config && config.retry > 0) {
+        config.retry -= 1;
+        console.log(`Retrying request (${config.retry} attempts remaining)...`);
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, config.retryDelay));
+        
+        // Retry the request
+        return api(config);
+      }
+      
+      // If we're out of retries, try to ping the server
       try {
         const response = await fetch(`${API_URL}/test`);
         const data = await response.json();
@@ -80,21 +99,5 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
-// Add retry logic for failed requests
-api.interceptors.response.use(null, async (error) => {
-  const { config } = error;
-  if (!config || !config.retry) {
-    return Promise.reject(error);
-  }
-  
-  config.retry -= 1;
-  const delayRetry = new Promise(resolve => {
-    setTimeout(resolve, config.retryDelay || 1000);
-  });
-  
-  await delayRetry;
-  return api(config);
-});
 
 export default api; 

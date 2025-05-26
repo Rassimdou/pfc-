@@ -60,7 +60,9 @@ export default function SurveillanceManagement() {
   const fetchTeachers = async () => {
     try {
       const response = await api.get('/admin/teachers');
-      setTeachers(response.data.data || []);
+      // Filter to show only active teachers
+      const activeTeachers = (response.data.data || []).filter(teacher => teacher.type === 'active');
+      setTeachers(activeTeachers);
     } catch (error) {
       console.error('Error fetching teachers:', error);
       toast.error('Failed to fetch teachers');
@@ -273,14 +275,14 @@ export default function SurveillanceManagement() {
                 <Button
                   variant="outline"
                   role="combobox"
-                  className="w-full justify-between"
+                  className="w-full justify-between bg-white"
                   onClick={() => setShowTeacherSearch(true)}
                 >
                   {selectedTeacher ? selectedTeacher.name : "Select a teacher..."}
                   <UserSearch className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
                 <Dialog open={showTeacherSearch} onOpenChange={setShowTeacherSearch}>
-                  <DialogContent>
+                  <DialogContent className="max-h-[80vh] overflow-y-auto bg-white">
                     <DialogHeader>
                       <DialogTitle>Search Teacher</DialogTitle>
                       <DialogDescription>
@@ -294,7 +296,7 @@ export default function SurveillanceManagement() {
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full"
                       />
-                      <div className="max-h-[300px] overflow-y-auto">
+                      <div className="max-h-[400px] overflow-y-auto bg-white">
                         {filteredTeachers.length === 0 ? (
                           <div className="text-center py-4 text-gray-500">No teachers found</div>
                         ) : (
@@ -302,7 +304,7 @@ export default function SurveillanceManagement() {
                             {filteredTeachers.map((teacher) => (
                               <div
                                 key={teacher.id}
-                                className="flex items-center gap-2 p-2 rounded-md hover:bg-gray-100 cursor-pointer"
+                                className="flex items-center gap-2 p-2 rounded-md hover:bg-gray-100 cursor-pointer bg-white"
                                 onClick={() => {
                                   setSelectedTeacher(teacher);
                                   setShowTeacherSearch(false);
@@ -337,6 +339,15 @@ export default function SurveillanceManagement() {
                   disabled={!selectedTeacher || uploading}
                   className="flex-1"
                 />
+                <Button
+                  variant="outline"
+                  onClick={() => document.getElementById('file').click()}
+                  disabled={!selectedTeacher || uploading}
+                  className="flex items-center gap-2"
+                >
+                  <Upload className="h-4 w-4" />
+                  Import
+                </Button>
                 {uploading && (
                   <div className="text-sm text-gray-500">Uploading...</div>
                 )}
@@ -373,7 +384,7 @@ export default function SurveillanceManagement() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="max-h-[500px] overflow-y-auto">
             {loading ? (
               <div className="text-center py-4 text-gray-500">Loading assignments...</div>
             ) : assignments.length === 0 ? (
@@ -381,8 +392,8 @@ export default function SurveillanceManagement() {
             ) : (
               <div className="rounded-lg border overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="border-b">
                       <th className="px-4 py-3 text-left font-medium text-gray-500">Date</th>
                       <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
                       <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
@@ -430,7 +441,7 @@ export default function SurveillanceManagement() {
       )}
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className="max-w-4xl bg-white">
+        <DialogContent className="max-w-4xl bg-white max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Preview Extracted Data</DialogTitle>
             <DialogDescription>
@@ -443,9 +454,9 @@ export default function SurveillanceManagement() {
           {previewAssignments.length > 0 && (
             <div className="mt-4 space-y-2">
               <h4 className="font-medium text-gray-900">Mark Responsible Assignments:</h4>
-              <div className="border rounded-lg p-4 space-y-3">
+              <div className="border rounded-lg p-4 space-y-3 max-h-[400px] overflow-y-auto">
                 {previewAssignments.map((assignment, index) => (
-                  <div key={index} className="flex items-center justify-between">
+                  <div key={index} className="flex items-center justify-between bg-white p-2 rounded-md">
                     <div>
                       <div className="font-medium">{assignment.module} - {assignment.room}</div>
                       <div className="text-sm text-gray-500">
@@ -484,7 +495,7 @@ export default function SurveillanceManagement() {
             </ul>
           </div>
 
-          <DialogFooter className="mt-6">
+          <DialogFooter className="mt-6 sticky bottom-0 bg-white pt-4 border-t">
             <Button variant="outline" onClick={() => setShowPreview(false)} disabled={importing}>
               Cancel
             </Button>

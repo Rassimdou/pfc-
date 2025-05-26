@@ -1,20 +1,9 @@
 import express from 'express';
 import { authenticate } from '../middleware/authMiddleware.js';
 import prisma from '../lib/prismaClient.js';
-import nodemailer from 'nodemailer'; // Import nodemailer
+import { sendSwapRequestNotification } from '../services/emailService.js';
 
 const router = express.Router();
-
-// Configure nodemailer transporter (Assuming process.env variables are set)
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
 
 // POST /api/swap/request-criteria
 // Initiates a swap request based on date and time criteria
@@ -164,7 +153,14 @@ router.post('/initiate-anonymous-request', authenticate, async (req, res) => {
     // Verify the 'from' assignment belongs to the authenticated user and is swappable
     const fromAssignment = await prisma.surveillanceAssignment.findUnique({
       where: { id: fromAssignmentIdInt },
-      select: { userId: true, canSwap: true }
+      select: { 
+        userId: true, 
+        canSwap: true,
+        date: true,
+        time: true,
+        module: true,
+        room: true
+      }
     });
 
     if (!fromAssignment || fromAssignment.userId !== userId) {
@@ -177,7 +173,7 @@ router.post('/initiate-anonymous-request', authenticate, async (req, res) => {
     // Verify the 'to' assignment exists, is swappable, and is not involved in a pending request
     const toAssignment = await prisma.surveillanceAssignment.findUnique({
         where: { id: toAssignmentIdInt },
-        select: { // Use select only to specify all desired fields and relations
+        select: {
             id: true,
             userId: true,
             canSwap: true,
@@ -185,18 +181,18 @@ router.post('/initiate-anonymous-request', authenticate, async (req, res) => {
             date: true,
             time: true,
             room: true,
-            user: { // Select the related user
-                select: { // Select specific fields from the user
+            user: {
+                select: {
                     email: true
                 }
             },
-            fromSwapRequests: { // Select the related fromSwapRequests
-                where: { status: 'PENDING' }, // Keep the where clause for filtering pending requests
-                 select: { id: true } // Select necessary fields from the relation, or true for all fields
+            fromSwapRequests: {
+                where: { status: 'PENDING' },
+                select: { id: true }
             },
-            toSwapRequests: { // Select the related toSwapRequests
-                where: { status: 'PENDING' }, // Keep the where clause for filtering pending requests
-                 select: { id: true } // Select necessary fields from the relation, or true for all fields
+            toSwapRequests: {
+                where: { status: 'PENDING' },
+                select: { id: true }
             }
         }
     });
@@ -219,37 +215,34 @@ router.post('/initiate-anonymous-request', authenticate, async (req, res) => {
       data: {
         fromAssignmentId: fromAssignmentIdInt,
         toAssignmentId: toAssignmentIdInt,
-        userId: userId, // The user who initiated the request
+        userId: userId,
         status: 'PENDING',
-        isAnonymous: true, // Mark as anonymous initially
+        isAnonymous: true,
       }
     });
 
     // Send anonymous email notification to the target teacher
-     try {
-         await transporter.sendMail({
-             from: process.env.SMTP_FROM,
-             to: toAssignment.user.email,
-             subject: 'New Anonymous Surveillance Swap Request',
-             html: `
-               <h2>New Anonymous Surveillance Swap Request</h2>
-               <p>Another teacher has requested to swap one of your surveillance duties.</p>
-               <h3>Your Assignment:</h3>
-               <ul>
-                 <li><strong>Date:</strong> ${new Date(toAssignment.date).toLocaleDateString()}</li>
-                 <li><strong>Time:</strong> ${toAssignment.time}</li>
-                 <li><strong>Module:</strong> ${toAssignment.module}</li>
-                 <li><strong>Room:</strong> ${toAssignment.room}</li>
-               </ul>
-               <p>Log in to the platform to view the request and decide whether to accept or decline. The identity of the requesting teacher will be revealed only if you accept.</p>
-             `,
-         });
-     } catch (emailError) {
-         console.error('Error sending anonymous swap notification email:', emailError);
-         // Optionally, decide whether to fail the request or just log the email error
-         // For now, we'll let the request succeed but log the email failure.
-     }
-
+    try {
+      await sendSwapRequestNotification(
+        toAssignment.user.email,
+        'Anonymous User',
+        {
+          // Current assignment (receiver's assignment)
+          date: toAssignment.date,
+          time: toAssignment.time,
+          module: toAssignment.module,
+          room: toAssignment.room,
+          // Requested assignment (sender's assignment)
+          requestedDate: fromAssignment.date,
+          requestedTime: fromAssignment.time,
+          requestedModule: fromAssignment.module,
+          requestedRoom: fromAssignment.room
+        }
+      );
+    } catch (emailError) {
+      console.error('Error sending anonymous swap notification email:', emailError);
+      // Continue with the request even if email fails
+    }
 
     res.json({
       success: true,

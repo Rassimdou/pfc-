@@ -37,7 +37,9 @@ export default function Surveillance() {
         setAssignments(response.data.assignments || []);
         // Filter assignments that are pending swaps
         const pending = response.data.assignments.filter(assignment => 
-          assignment.swapRequest && assignment.swapRequest.status === 'PENDING'
+          assignment.swapRequest && 
+          assignment.swapRequest.status === 'PENDING' &&
+          assignment.swapRequest.fromAssignmentId !== assignment.id // Only show swaps where user is not the sender
         );
         setPendingSwaps(pending);
       } else {
@@ -199,22 +201,36 @@ export default function Surveillance() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700"
-                      onClick={() => handleAcceptSwap(swap.swapRequest.id)}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Accept
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDeclineSwap(swap.swapRequest.id)}
-                    >
-                      <XCircle className="h-4 w-4 mr-1" />
-                      Decline
-                    </Button>
+                    {swap.isSender ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => handleCancelSwap(swap.swapRequest.id)}
+                      >
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Cancel Request
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                          onClick={() => handleAcceptSwap(swap.swapRequest.id)}
+                        >
+                          <CheckCircle className="h-4 w-4 mr-1" />
+                          Accept
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeclineSwap(swap.swapRequest.id)}
+                        >
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Decline
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

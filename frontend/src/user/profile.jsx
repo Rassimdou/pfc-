@@ -4,16 +4,15 @@ import { Button } from "@/ui/button"
 import { Input } from "@/ui/input"
 import { Label } from "@/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs"
-import { User, Mail, Phone, Building, Briefcase, Shield, Key, Clock, Calendar, LogIn, Eye, EyeOff } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select"
+import { User, Mail, Phone, Key, Clock, LogIn, Eye, EyeOff } from "lucide-react"
 import api from "@/utils/axios"
 import { toast } from "react-hot-toast"
 
-export default function AdminProfile() {
+export default function UserProfile() {
   const [loading, setLoading] = useState(false);
   const [profileData, setProfileData] = useState({
-    firstName: "Admin",
-    lastName: "Faculte Informatique",
+    firstName: "",
+    lastName: "",
     email: "",
     phoneNumber: "",
   });
@@ -27,24 +26,29 @@ export default function AdminProfile() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
-    // Try to fetch profile data, if it fails use default values
-    fetchAdminProfile().catch(() => {
-      // If fetch fails, keep the default values
-      console.log('Using default profile data');
-    });
+    fetchUserProfile();
   }, []);
 
-  const fetchAdminProfile = async () => {
+  const fetchUserProfile = async () => {
     try {
-      const response = await api.get('/admin/profile');
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to access your profile');
+        return;
+      }
+
+      const response = await api.get('/users/profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       if (response.data.success) {
         setProfileData(response.data.data);
       }
     } catch (error) {
-      console.error('Error fetching admin profile:', error);
+      console.error('Error fetching user profile:', error);
       toast.error('Failed to fetch profile data');
-      // Keep default values if fetch fails
-      throw error;
     }
   };
 
@@ -68,7 +72,18 @@ export default function AdminProfile() {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await api.put('/admin/profile', profileData);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to update your profile');
+        return;
+      }
+
+      const response = await api.put('/users/profile', profileData, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       if (response.data.success) {
         toast.success('Profile updated successfully');
         // Update local storage with new user data
@@ -94,7 +109,18 @@ export default function AdminProfile() {
     }
     setLoading(true);
     try {
-      const response = await api.post('/admin/change-password', securityData);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to change your password');
+        return;
+      }
+
+      const response = await api.post('/users/change-password', securityData, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       if (response.data.success) {
         toast.success('Password changed successfully');
         setSecurityData({
@@ -111,39 +137,6 @@ export default function AdminProfile() {
       setLoading(false);
     }
   };
-
-  const permissions = [
-    {
-      title: "User Management",
-      description: "Create, edit, and delete user accounts",
-      access: "Full Access",
-    },
-    {
-      title: "Schedule Management",
-      description: "Upload and modify teaching schedules",
-      access: "Full Access",
-    },
-    {
-      title: "Exchange Approval",
-      description: "Approve or reject swap requests",
-      access: "Full Access",
-    },
-    {
-      title: "System Configuration",
-      description: "Modify system settings and parameters",
-      access: "Full Access",
-    },
-    {
-      title: "Reports & Analytics",
-      description: "Generate and view system reports",
-      access: "Full Access",
-    },
-    {
-      title: "Department Management",
-      description: "Manage department settings",
-      access: "Full Access",
-    },
-  ]
 
   const activityItems = [
     {
@@ -164,13 +157,13 @@ export default function AdminProfile() {
       time: "Oct 10, 2023, 11:30 AM",
       icon: User,
     }
-  ]
+  ];
 
   return (
     <div className="space-y-6 p-6">
       {/* Header Section */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-gray-900">Admin Profile</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">User Profile</h1>
       </div>
 
       {/* Main Content Grid */}
@@ -187,7 +180,7 @@ export default function AdminProfile() {
                 {profileData.firstName?.[0]}{profileData.lastName?.[0]}
               </div>
               <h2 className="text-xl font-semibold text-gray-900">{profileData.firstName} {profileData.lastName}</h2>
-              <p className="text-sm text-gray-500">System Administrator</p>
+              <p className="text-sm text-gray-500">Professor</p>
             </div>
             
             <div className="space-y-3">
@@ -208,7 +201,7 @@ export default function AdminProfile() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="profile">
-              <TabsList className="grid w-full grid-cols-2 mb-6 bg-gray-50 p-1 rounded-lg">
+              <TabsList className="grid w-full grid-cols-3 mb-6 bg-gray-50 p-1 rounded-lg">
                 <TabTrigger value="profile">Profile</TabTrigger>
                 <TabTrigger value="activity">Activity</TabTrigger>
                 <TabTrigger value="security">Security</TabTrigger>
@@ -353,23 +346,8 @@ export default function AdminProfile() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Permissions Card */}
-      <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-        <CardHeader>
-          <CardTitle className="text-lg font-medium text-gray-900">Admin Permissions</CardTitle>
-          <CardDescription className="text-gray-500">Your current system access levels</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            {permissions.map((item, index) => (
-              <PermissionItem key={index} {...item} />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
-  )
+  );
 }
 
 // Reusable Components
@@ -378,7 +356,7 @@ const ProfileInfoItem = ({ icon: Icon, text }) => (
     <Icon className="h-4 w-4 text-gray-500 flex-shrink-0" />
     <span>{text}</span>
   </div>
-)
+);
 
 const TabTrigger = ({ value, children }) => (
   <TabsTrigger 
@@ -387,7 +365,7 @@ const TabTrigger = ({ value, children }) => (
   >
     {children}
   </TabsTrigger>
-)
+);
 
 const InputField = ({ label, id, type = "text", value, onChange }) => (
   <div className="space-y-2">
@@ -400,7 +378,7 @@ const InputField = ({ label, id, type = "text", value, onChange }) => (
       className="border-gray-300 hover:border-gray-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
     />
   </div>
-)
+);
 
 const ActivityItem = ({ action, details, time, icon: Icon }) => (
   <div className="flex items-start gap-3 p-4 hover:bg-gray-50 transition-colors">
@@ -415,16 +393,4 @@ const ActivityItem = ({ action, details, time, icon: Icon }) => (
       </div>
     </div>
   </div>
-)
-
-const PermissionItem = ({ title, description, access }) => (
-  <div className="rounded-lg border border-gray-200 p-4 bg-white hover:bg-gray-50 transition-colors">
-    <h3 className="font-medium text-gray-900">{title}</h3>
-    <p className="text-sm text-gray-500 mt-1">{description}</p>
-    <div className="mt-3">
-      <span className="inline-flex items-center rounded-full bg-green-100/80 px-2.5 py-0.5 text-xs font-medium text-green-800">
-        {access}
-      </span>
-    </div>
-  </div>
-)
+); 

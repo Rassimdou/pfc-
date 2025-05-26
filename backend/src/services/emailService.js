@@ -15,6 +15,25 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
+  },
+  tls: {
+    // Do not fail on invalid certs
+    rejectUnauthorized: false,
+    minVersion: 'TLSv1.2'
+  }
+});
+
+// Verify transporter configuration
+transporter.verify(function(error, success) {
+  if (error) {
+    console.error('SMTP Connection Error:', {
+      message: error.message,
+      code: error.code,
+      command: error.command,
+      stack: error.stack
+    });
+  } else {
+    console.log('SMTP Server is ready to take our messages');
   }
 });
 
@@ -25,18 +44,38 @@ const invitationTemplate = fs.readFileSync(
 );
 
 export const sendInvitationEmail = async (email, invitationLink) => {
+  // Replace template variables
+  const html = invitationTemplate
+    .replace(/{{invitationLink}}/g, invitationLink)
+    .replace(/{{currentYear}}/g, new Date().getFullYear());
+
   const mailOptions = {
-    from: process.env.SMTP_FROM,
+    from: {
+      name: 'USTHB Platform',
+      address: process.env.SMTP_FROM
+    },
     to: email,
     subject: 'Invitation to Join USTHB Platform',
-    html: `
-      <h1>Welcome to USTHB Platform</h1>
-      <p>You have been invited to join the USTHB platform. Click the link below to complete your registration:</p>
-      <a href="${invitationLink}">Complete Registration</a>
-    `
+    html: html,
+    headers: {
+      'X-Antivirus': 'Checked',
+      'X-Antivirus-Status': 'Clean'
+    }
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    console.log('Attempting to send invitation email to:', email);
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Email sent successfully:', info.response);
+    return info;
+  } catch (error) {
+    console.error('Failed to send invitation email:', {
+      error: error.message,
+      code: error.code,
+      command: error.command
+    });
+    throw error;
+  }
 };
 
 export const sendSwapRequestNotification = async (receiverEmail, senderName, assignmentDetails) => {

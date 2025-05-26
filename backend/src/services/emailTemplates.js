@@ -256,6 +256,26 @@ export const getSwapRequestTemplate = (senderName, assignmentDetails) => {
                 <span>${assignmentDetails.room}</span>
               </div>
             </div>
+
+            <div class="assignment-card">
+              <h4>Requested Assignment</h4>
+              <div class="info-row">
+                <strong>Date:</strong>
+                <span>${new Date(assignmentDetails.requestedDate).toLocaleDateString()}</span>
+              </div>
+              <div class="info-row">
+                <strong>Time:</strong>
+                <span>${assignmentDetails.requestedTime}</span>
+              </div>
+              <div class="info-row">
+                <strong>Module:</strong>
+                <span>${assignmentDetails.requestedModule}</span>
+              </div>
+              <div class="info-row">
+                <strong>Room:</strong>
+                <span>${assignmentDetails.requestedRoom}</span>
+              </div>
+            </div>
           </div>
 
           <div class="button-container">
@@ -454,4 +474,4 @@ export const getPermutationRequestTemplate = (senderName, slotDetails) => {
     </body>
     </html>
   `;
-}; 
+};

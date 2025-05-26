@@ -30,15 +30,14 @@ export default function Signup() {
     const token = searchParams.get('token');
     const email = searchParams.get('email');
     if (token) {
-      setIsGoogleSignup(true);
-      setFormData(prev => ({
-        ...prev,
-        email: email || ''
-      }));
       // Store token immediately
       localStorage.setItem('token', token);
-      // If email is provided, mark it as verified
+      // If email is provided, pre-fill and mark as verified
       if (email) {
+        setFormData(prev => ({
+          ...prev,
+          email: email
+        }));
         setEmailVerified(true);
       }
     }
@@ -112,22 +111,24 @@ export default function Signup() {
     try {
       setLoading(true);
       
-      // If it's a Google signup, we don't need to set a password
-      if (isGoogleSignup) {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-
-        const response = await api.post('/auth/complete-google-signup', {
+      // Get the token from URL params or localStorage
+      const token = searchParams.get('token') || localStorage.getItem('token');
+      
+      if (token) {
+        // This is an invitation signup
+        const response = await api.post('/auth/set-password', {
           email: formData.email,
+          password: formData.password,
           firstName: formData.firstName,
           lastName: formData.lastName,
-          phoneNumber: formData.phoneNumber
+          phoneNumber: formData.phoneNumber,
+          isGoogleSignup: false
         }, {
           headers: {
             Authorization: `Bearer ${token}`
-          }
+          },
+          retry: 3,
+          retryDelay: 1000
         });
 
         if (response.data.success) {
@@ -146,6 +147,9 @@ export default function Signup() {
           lastName: formData.lastName,
           phoneNumber: formData.phoneNumber,
           isGoogleSignup: false
+        }, {
+          retry: 3,
+          retryDelay: 1000
         });
 
         if (response.data.success) {
@@ -156,21 +160,51 @@ export default function Signup() {
         }
       }
     } catch (err) {
-      const errorMessage = err.response?.data?.message || "An error occurred during signup";
+      console.error('Signup error:', err);
+      let errorMessage = "An error occurred during signup";
+      
+      if (err.response) {
+        console.error('Error response:', err.response.data);
+        errorMessage = err.response.data.message || errorMessage;
+        
+        // Handle specific error cases
+        if (err.response.status === 401) {
+          localStorage.removeItem('token');
+          navigate('/login');
+          return;
+        }
+      } else if (err.request) {
+        console.error('No response received:', err.request);
+        errorMessage = "Unable to connect to the server. Please check your internet connection and try again.";
+        
+        // Check if server is running
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/test`);
+          const data = await response.json();
+          console.log('Server test response:', data);
+          errorMessage = "Server is running but request failed. Please try again.";
+        } catch (pingError) {
+          console.error('Server ping failed:', pingError);
+          errorMessage = "Server is not responding. Please try again later.";
+        }
+      } else {
+        console.error('Error:', err.message);
+        errorMessage = err.message;
+      }
+
       setError(errorMessage);
       toast.error(errorMessage);
-      // If token is invalid, redirect to login
-      if (err.response?.status === 401) {
-        localStorage.removeItem('token');
-        navigate('/login');
-      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
+    setLoading(true);
+    const baseUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, ''); // Remove trailing slash if present
+    const googleAuthUrl = `${baseUrl}/api/auth/google`;
+    console.log('Redirecting to Google auth:', googleAuthUrl);
+    window.location.href = googleAuthUrl;
   };
 
   return (
@@ -197,11 +231,13 @@ export default function Signup() {
             <div className="space-y-4">
               <Button 
                 type="button" 
-                className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+                className="w-full bg-white border border-gray-300 text-black hover:bg-gray-50"
                 onClick={handleGoogleSignup}
               >
-                <img src="/google-icon.svg" alt="Google" className="w-5 h-5 mr-2" />
-                Continue with Google
+                <span className="flex items-center justify-center text-black">
+                  <img src="/google-icon.svg" alt="Google" className="w-5 h-5 mr-2" />
+                  <span className="text-black font-medium">Continue with Google</span>
+                </span>
               </Button>
 
               <div className="relative">

@@ -31,7 +31,14 @@ export default function Login() {
 
     try {
       console.log('Starting login process...');
-      const response = await api.post("/auth/login", { email, password });
+      console.log('Email:', email);
+      console.log('API URL:', import.meta.env.VITE_API_URL);
+      
+      const response = await api.post("auth/login", { 
+        email: email.toLowerCase().trim(),
+        password: password
+      });
+      
       console.log('Login response received:', response.data);
 
       if (response.data.success) {
@@ -101,7 +108,8 @@ export default function Login() {
 
   const handleGoogleLogin = () => {
     setLoading(true);
-    const googleAuthUrl = `${import.meta.env.VITE_API_URL}/auth/google`;
+    const baseUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, ''); // Remove trailing slash if present
+    const googleAuthUrl = `${baseUrl}/api/auth/google`;
     console.log('Redirecting to Google auth:', googleAuthUrl);
     window.location.href = googleAuthUrl;
   };
@@ -129,7 +137,7 @@ export default function Login() {
           <div className="space-y-4">
             <Button 
               type="button" 
-              className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="w-full bg-white border border-gray-300 text-black hover:bg-gray-50"
               onClick={handleGoogleLogin}
               disabled={loading}
             >
@@ -139,10 +147,10 @@ export default function Login() {
                   Redirecting...
                 </span>
               ) : (
-                <>
+                <span className="flex items-center justify-center text-black">
                   <img src="/google-icon.svg" alt="Google" className="w-5 h-5 mr-2" />
-                  Continue with Google
-                </>
+                  <span className="text-black font-medium">Continue with Google</span>
+                </span>
               )}
             </Button>
 

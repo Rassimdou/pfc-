@@ -9,6 +9,7 @@ import fs from 'fs';
 import nodemailer from 'nodemailer';
 import { JSDOM } from 'jsdom';
 import { createSwapRequest, getPendingSwapRequests } from '../controllers/surveillanceController.js';
+import { sendSwapRequestNotification } from '../services/emailService.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -523,35 +524,62 @@ router.post('/confirm-upload', isAuthenticated, async (req, res) => {
 
     // Send email notification to the teacher
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
+      },
+      tls: {
+        rejectUnauthorized: false
       }
     });
 
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: teacher.email,
-      subject: 'New Surveillance Assignments',
-      html: `
-        <h2>New Surveillance Assignments</h2>
-        <p>You have been assigned ${createdAssignments.length} new surveillance duties:</p>
-        <ul>
-          ${createdAssignments.map(assignment => `
-            <li>
-              <strong>Date:</strong> ${new Date(assignment.date).toLocaleDateString()}<br>
-              <strong>Time:</strong> ${assignment.time}<br>
-              <strong>Module:</strong> ${assignment.module}<br>
-              <strong>Room:</strong> ${assignment.room}
-            </li>
-          `).join('')}
-        </ul>
-        <p>Please log in to your account to view more details.</p>
-      `
-    });
+    try {
+      console.log('Attempting to send email to:', teacher.email);
+      console.log('SMTP Configuration:', {
+        service: 'gmail',
+        user: process.env.SMTP_USER,
+        from: process.env.SMTP_FROM
+      });
+
+      await transporter.sendMail({
+        from: {
+          name: 'USTHB Platform',
+          address: process.env.SMTP_USER // Use the Gmail address directly
+        },
+        to: teacher.email,
+        subject: 'New Surveillance Assignment',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #059669;">New Surveillance Assignment</h2>
+            <p>You have been assigned a new surveillance duty:</p>
+            <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>Date:</strong> ${new Date(createdAssignments[0].date).toLocaleDateString()}</p>
+              <p><strong>Time:</strong> ${createdAssignments[0].time}</p>
+              <p><strong>Module:</strong> ${createdAssignments[0].module}</p>
+              <p><strong>Room:</strong> ${createdAssignments[0].room}</p>
+              <p><strong>Role:</strong> ${createdAssignments[0].isResponsible ? 'Responsible' : 'Assistant'}</p>
+            </div>
+            <p>Please log in to your dashboard to view more details.</p>
+            <hr style="border: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #666; font-size: 12px;">
+              This is an automated message, please do not reply to this email.
+            </p>
+          </div>
+        `
+      });
+      console.log('Email sent successfully to:', teacher.email);
+    } catch (emailError) {
+      console.error('Failed to send email notification:', {
+        error: emailError.message,
+        code: emailError.code,
+        command: emailError.command,
+        stack: emailError.stack,
+        response: emailError.response,
+        responseCode: emailError.responseCode
+      });
+      // Don't throw the error, just log it and continue
+    }
 
     res.json({
       success: true,
@@ -685,40 +713,34 @@ router.post('/:assignmentId/swap-request', isAuthenticated, async (req, res) => 
     });
 
     // Send email notification to the target teacher
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
-
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: toAssignment.user.email,
-      subject: 'New Surveillance Swap Request',
-      html: `
-        <h2>New Surveillance Swap Request</h2>
-        <p>${fromAssignment.user.name} has requested to swap surveillance duties with you:</p>
-        <h3>Your Current Assignment:</h3>
-        <ul>
-          <li><strong>Date:</strong> ${new Date(toAssignment.date).toLocaleDateString()}</li>
-          <li><strong>Time:</strong> ${toAssignment.time}</li>
-          <li><strong>Module:</strong> ${toAssignment.module}</li>
-          <li><strong>Room:</strong> ${toAssignment.room}</li>
-        </ul>
-        <h3>Proposed Assignment:</h3>
-        <ul>
-          <li><strong>Date:</strong> ${new Date(fromAssignment.date).toLocaleDateString()}</li>
-          <li><strong>Time:</strong> ${fromAssignment.time}</li>
-          <li><strong>Module:</strong> ${fromAssignment.module}</li>
-          <li><strong>Room:</strong> ${fromAssignment.room}</li>
-        </ul>
-        <p>Please log in to your account to accept or decline this request.</p>
-      `
-    });
+    try {
+      await sendSwapRequestNotification(
+        toAssignment.user.email,
+        fromAssignment.user.name,
+        {
+          // Current assignment (receiver's assignment)
+          date: toAssignment.date,
+          time: toAssignment.time,
+          module: toAssignment.module,
+          room: toAssignment.room,
+          // Requested assignment (sender's assignment)
+          requestedDate: fromAssignment.date,
+          requestedTime: fromAssignment.time,
+          requestedModule: fromAssignment.module,
+          requestedRoom: fromAssignment.room
+        }
+      );
+      console.log('Swap request email sent successfully to:', toAssignment.user.email);
+    } catch (emailError) {
+      console.error('Failed to send swap request email:', {
+        error: emailError.message,
+        code: emailError.code,
+        command: emailError.command,
+        stack: emailError.stack,
+        response: emailError.response,
+        responseCode: emailError.responseCode
+      });
+    }
 
     res.json({
       success: true,
@@ -785,39 +807,36 @@ router.post('/swap/:requestId/accept', isAuthenticated, async (req, res) => {
     ]);
 
     // Send email notifications
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
-
+    try {
     // Notify both teachers
     await Promise.all([
-      transporter.sendMail({
-        from: process.env.SMTP_FROM,
-        to: swapRequest.fromAssignment.user.email,
-        subject: 'Surveillance Swap Request Accepted',
-        html: `
-          <h2>Swap Request Accepted</h2>
-          <p>Your surveillance swap request has been accepted.</p>
-          <p>The assignments have been swapped successfully.</p>
-        `
-      }),
-      transporter.sendMail({
-        from: process.env.SMTP_FROM,
-        to: swapRequest.toAssignment.user.email,
-        subject: 'Surveillance Swap Request Accepted',
-        html: `
-          <h2>Swap Request Accepted</h2>
-          <p>You have accepted the surveillance swap request.</p>
-          <p>The assignments have been swapped successfully.</p>
-        `
-      })
-    ]);
+        sendSwapRequestNotification(
+          swapRequest.fromAssignment.user.email,
+          'System',
+          {
+            date: swapRequest.fromAssignment.date,
+            time: swapRequest.fromAssignment.time,
+            module: swapRequest.fromAssignment.module,
+            room: swapRequest.fromAssignment.room,
+            status: 'accepted'
+          }
+        ),
+        sendSwapRequestNotification(
+          swapRequest.toAssignment.user.email,
+          'System',
+          {
+            date: swapRequest.toAssignment.date,
+            time: swapRequest.toAssignment.time,
+            module: swapRequest.toAssignment.module,
+            room: swapRequest.toAssignment.room,
+            status: 'accepted'
+          }
+        )
+      ]);
+    } catch (emailError) {
+      console.error('Failed to send acceptance notifications:', emailError);
+      // Continue with the response even if email fails
+    }
 
     res.json({
       success: true,
@@ -873,12 +892,13 @@ router.post('/swap/:requestId/decline', isAuthenticated, async (req, res) => {
 
     // Send email notification to the requester
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
+      },
+      tls: {
+        rejectUnauthorized: false
       }
     });
 
@@ -946,12 +966,13 @@ router.post('/swap/:requestId/cancel', isAuthenticated, async (req, res) => {
 
     // Send email notification to the target teacher
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
+      },
+      tls: {
+        rejectUnauthorized: false
       }
     });
 
@@ -1084,12 +1105,13 @@ router.delete('/teacher/:teacherId/all', isAuthenticated, async (req, res) => {
 
     // Send email notification to the teacher
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
+      },
+      tls: {
+        rejectUnauthorized: false
       }
     });
 

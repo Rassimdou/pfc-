@@ -266,6 +266,214 @@ class ScheduleService {
       };
     }
   }
+
+  static async savePlanningData(planningData, options = {}) {
+    try {
+      const {
+        specialityName,
+        academicYear,
+        semester,
+        sectionName
+      } = options;
+
+      console.log('Received planning data:', planningData);
+      console.log('Received options:', options);
+
+      // Validate required fields
+      if (!specialityName || !academicYear || !semester || !sectionName) {
+        throw new Error('Missing required fields: specialityName, academicYear, semester, or sectionName');
+      }
+
+      // First find or create the palier
+      const palierRecord = await prisma.palier.upsert({
+        where: {
+          name: 'LMD' // Default palier name
+        },
+        update: {},
+        create: {
+          name: 'LMD'
+        }
+      });
+
+      // Find or create the year
+      const year = await prisma.year.upsert({
+        where: {
+          name_palierId: {
+            name: String(academicYear),
+            palierId: palierRecord.id
+          }
+        },
+        update: {},
+        create: {
+          name: String(academicYear),
+          palierId: palierRecord.id
+        }
+      });
+
+      // Find or create the speciality
+      const speciality = await prisma.speciality.upsert({
+        where: {
+          name_palierId_yearId: {
+            name: specialityName,
+            palierId: palierRecord.id,
+            yearId: year.id
+          }
+        },
+        update: {},
+        create: {
+          name: specialityName,
+          palierId: palierRecord.id,
+          yearId: year.id
+        }
+      });
+
+      // Find or create the module
+      const module = await prisma.module.upsert({
+        where: {
+          code_academicYear: {
+            code: planningData.moduleCode || 'TBA',
+            academicYear: parseInt(academicYear)
+          }
+        },
+        update: {
+          name: planningData.moduleName || 'TBA',
+          specialityId: speciality.id,
+          yearId: year.id,
+          palierId: palierRecord.id,
+          semestre: semester
+        },
+        create: {
+          code: planningData.moduleCode || 'TBA',
+          name: planningData.moduleName || 'TBA',
+          specialityId: speciality.id,
+          yearId: year.id,
+          palierId: palierRecord.id,
+          academicYear: parseInt(academicYear),
+          semestre: semester
+        }
+      });
+
+      // Find or create the section
+      const section = await prisma.section.upsert({
+        where: {
+          name_moduleId_academicYear: {
+            name: sectionName,
+            moduleId: module.id,
+            academicYear: parseInt(academicYear)
+          }
+        },
+        update: {
+          yearId: year.id,
+          palierId: palierRecord.id
+        },
+        create: {
+          name: sectionName,
+          moduleId: module.id,
+          academicYear: parseInt(academicYear),
+          yearId: year.id,
+          palierId: palierRecord.id
+        }
+      });
+
+      const savedSlots = [];
+      const errors = [];
+
+      // Process each planning entry
+      for (const entry of planningData.entries) {
+        try {
+          // Find or create professor
+          const professor = await prisma.user.upsert({
+            where: {
+              email: `${(entry.professorName || 'TBA').toLowerCase().replace(/\s+/g, '.')}@example.com`
+            },
+            update: {
+              name: entry.professorName || 'TBA',
+              role: 'PROFESSOR'
+            },
+            create: {
+              email: `${(entry.professorName || 'TBA').toLowerCase().replace(/\s+/g, '.')}@example.com`,
+              name: entry.professorName || 'TBA',
+              role: 'PROFESSOR',
+              isVerified: true
+            }
+          });
+
+          // Find or create room
+          const room = await prisma.room.upsert({
+            where: {
+              name: entry.roomNumber || 'TBA'
+            },
+            update: {
+              type: entry.roomType || 'SALLE_COURS'
+            },
+            create: {
+              name: entry.roomNumber || 'TBA',
+              type: entry.roomType || 'SALLE_COURS',
+              capacity: 30
+            }
+          });
+
+          // Create or update schedule slot
+          const scheduleSlot = await prisma.scheduleSlot.upsert({
+            where: {
+              moduleId_sectionId_dayOfWeek_startTime: {
+                moduleId: module.id,
+                sectionId: section.id,
+                dayOfWeek: entry.dayOfWeek,
+                startTime: entry.startTime
+              }
+            },
+            update: {
+              endTime: entry.endTime,
+              isAvailable: false,
+              ownerId: professor.id,
+              roomId: room.id
+            },
+            create: {
+              dayOfWeek: entry.dayOfWeek,
+              startTime: entry.startTime,
+              endTime: entry.endTime,
+              isAvailable: false,
+              ownerId: professor.id,
+              moduleId: module.id,
+              sectionId: section.id,
+              roomId: room.id
+            }
+          });
+
+          savedSlots.push(scheduleSlot);
+        } catch (error) {
+          console.error('Error processing entry:', error);
+          errors.push({
+            entry,
+            error: error.message
+          });
+        }
+      }
+
+      if (errors.length > 0) {
+        return {
+          success: false,
+          error: `Failed to process ${errors.length} entries`,
+          details: errors
+        };
+      }
+
+      return {
+        success: true,
+        message: `Successfully saved ${savedSlots.length} schedule slots`,
+        data: savedSlots
+      };
+
+    } catch (error) {
+      console.error('Error saving planning data:', error);
+      return {
+        success: false,
+        error: error.message,
+        details: error.stack
+      };
+    }
+  }
 }
 
 export default ScheduleService; 

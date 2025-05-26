@@ -1,6 +1,7 @@
 import prisma from '../lib/prismaClient.js';
 import { sendInvitationEmail } from '../services/emailService.js'; // Ensure this service exists
 import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 
 export const registerTeacher = async (req, res) => {
   // Check if user is admin
@@ -75,7 +76,7 @@ export const registerTeacher = async (req, res) => {
 
     // Send invitation email
     try {
-      const invitationLink = `${process.env.FRONTEND_URL}/signup?token=${token}&email=${encodeURIComponent(normalizedEmail)}`;
+      const invitationLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/signup?token=${token}&email=${encodeURIComponent(normalizedEmail)}`;
       await sendInvitationEmail(normalizedEmail, invitationLink);
       console.log('Invitation email sent successfully');
     } catch (emailError) {
@@ -438,7 +439,7 @@ export const resendInvitation = async (req, res) => {
     });
 
     // Send new invitation email
-    const invitationLink = `${process.env.FRONTEND_URL}/signup?token=${token}&email=${encodeURIComponent(email)}`;
+    const invitationLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/signup?token=${token}&email=${encodeURIComponent(email)}`;
     await sendInvitationEmail(email, invitationLink);
 
     res.json({
@@ -472,6 +473,161 @@ export const deletePendingTeacher = async (req, res) => {
     res.status(404).json({
       success: false,
       message: 'Pending teacher not found'
+    });
+  }
+};
+
+export const getAdminProfile = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    
+    const admin = await prisma.user.findUnique({
+      where: { id: adminId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        role: true
+      }
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Admin profile not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: admin
+    });
+  } catch (error) {
+    console.error('Error fetching admin profile:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch admin profile',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+export const updateAdminProfile = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { firstName, lastName, email, phoneNumber } = req.body;
+
+    // Validate required fields
+    if (!firstName || !lastName || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'First name, last name, and email are required'
+      });
+    }
+
+    // Check if email is already taken by another user
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        email,
+        id: { not: adminId }
+      }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already taken'
+      });
+    }
+
+    const updatedAdmin = await prisma.user.update({
+      where: { id: adminId },
+      data: {
+        firstName,
+        lastName,
+        email,
+        phoneNumber
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        role: true
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: updatedAdmin
+    });
+  } catch (error) {
+    console.error('Error updating admin profile:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update admin profile',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+export const changeAdminPassword = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate required fields
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required'
+      });
+    }
+
+    // Get admin with password
+    const admin = await prisma.user.findUnique({
+      where: { id: adminId }
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Admin not found'
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, admin.password);
+    if (!isPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await prisma.user.update({
+      where: { id: adminId },
+      data: { password: hashedPassword }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Error changing admin password:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to change password',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
