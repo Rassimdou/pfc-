@@ -10,6 +10,9 @@ import { useState, useRef, useEffect } from "react"
 import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
+import { useNavigate } from "react-router-dom";
+import ScheduleService from '@/services/ScheduleService';
+import { Table, TableBody, TableCell, TableHeader, TableRow, TableHead } from "@/ui/table"
 
 export default function Planning() {
   // State for form fields
@@ -57,6 +60,15 @@ export default function Planning() {
   const [filteredSpecialities, setFilteredSpecialities] = useState([]);
   // State for sections
   const [sections, setSections] = useState([]);
+  const [selectedSection, setSelectedSection] = useState(null);
+  const [isAddSectionDialogOpen, setIsAddSectionDialogOpen] = useState(false);
+  const [isEditSectionDialogOpen, setIsEditSectionDialogOpen] = useState(false);
+  const [isDeleteSectionDialogOpen, setIsDeleteSectionDialogOpen] = useState(false);
+  const [newSection, setNewSection] = useState({
+    name: '',
+    specialityId: null,
+    academicYear: 1
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [specialityFile, setSpecialityFile] = useState(null);
   const [isUploadingSpecialities, setIsUploadingSpecialities] = useState(false);
@@ -137,12 +149,14 @@ export default function Planning() {
 
   // State for module management
   const [newModule, setNewModule] = useState({
-    code: "",
-    name: "",
-    speciality: "Informatique",
-    year: 1,
-    semester: "SEMESTRE1",
-    palier: "LMD"
+    code: '',
+    name: '',
+    description: '',
+    academicYear: 1,
+    semester: 'SEMESTRE1',
+    specialityId: null,
+    palierId: null,
+    yearId: null
   });
   const [isAddModuleDialogOpen, setIsAddModuleDialogOpen] = useState(false);
   const [isEditModuleDialogOpen, setIsEditModuleDialogOpen] = useState(false);
@@ -161,7 +175,6 @@ export default function Planning() {
 
   // Add new state for section schedules
   const [sectionSchedules, setSectionSchedules] = useState([]);
-  const [selectedSection, setSelectedSection] = useState(''); // Use empty string initially
   const [isAddSectionScheduleDialogOpen, setIsAddSectionScheduleDialogOpen] = useState(false);
   const [isEditSectionScheduleDialogOpen, setIsEditSectionScheduleDialogOpen] = useState(false);
   const [isDeleteSectionScheduleDialogOpen, setIsDeleteSectionScheduleDialogOpen] = useState(false);
@@ -263,7 +276,7 @@ export default function Planning() {
       const yearNumber = parseInt(formData.year);
       console.log('Filtering for year:', yearNumber);
   
-      // Step 1: Filter specialties
+      // Filter specialties based on year
       const filtered = specialities.filter(speciality => {
         const name = speciality.name.toUpperCase().replace(/ /g, ''); // Normalize name
         let targetCodes = [];
@@ -272,7 +285,7 @@ export default function Planning() {
         if (yearNumber >= 1 && yearNumber <= 3) {
           targetCodes.push(
             `L${yearNumber}`, 
-            `LICENCE${yearNumber}`, // Matches "Licence1", "Licence2", etc.
+            `LICENCE${yearNumber}`,
             `ING${yearNumber}`
           );
         } 
@@ -286,7 +299,7 @@ export default function Planning() {
         return targetCodes.some(code => name.includes(code));
       });
   
-      // Step 2: Deduplicate specialties by name (e.g., SIGL L2)
+      // Deduplicate specialties by name
       const uniqueNames = new Set();
       const dedupedFiltered = filtered.filter(speciality => {
         if (!uniqueNames.has(speciality.name)) {
@@ -372,8 +385,8 @@ export default function Planning() {
         });
 
         if (response.data.success) {
-          setSectionSchedules(response.data.schedules);
-          console.log('Received schedule data:', response.data.schedules);
+          setSectionSchedules(response.data.scheduleSlots || []);
+          console.log('Received schedule data:', response.data.scheduleSlots);
         } else {
           toast.error(response.data.message || 'Failed to fetch schedules');
         }
@@ -398,6 +411,11 @@ export default function Planning() {
   // Handle adding new classroom
   const handleAddClassroom = async () => {
     try {
+      if (!newClassroom.name || !newClassroom.number || !newClassroom.type) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
+
       const response = await api.post('/admin/classrooms', {
         ...newClassroom,
         capacity: parseInt(newClassroom.capacity) || null,
@@ -416,6 +434,8 @@ export default function Planning() {
           building: ''
         });
         setIsAddDialogOpen(false);
+      } else {
+        toast.error(response.data.message || 'Failed to add classroom');
       }
     } catch (error) {
       console.error('Error adding classroom:', error);
@@ -498,22 +518,65 @@ export default function Planning() {
   };
 
   // Module handlers
-  const handleAddModule = () => {
-    const module = {
-      id: modules.length + 1,
-      ...newModule,
-      year: parseInt(newModule.year)
-    };
-    setModules(prev => [...prev, module]);
-    setNewModule({
-      code: "",
-      name: "",
-      speciality: "Informatique",
-      year: 1,
-      semester: "SEMESTRE1",
-      palier: "LMD"
-    });
-    setIsAddModuleDialogOpen(false);
+  const handleAddModule = async () => {
+    try {
+      if (!newModule.code || !newModule.name || !newModule.specialityId) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
+
+      // Get the selected speciality to find its palier and year
+      const selectedSpeciality = specialities.find(s => s.id === newModule.specialityId);
+      if (!selectedSpeciality) {
+        toast.error('Selected speciality not found');
+        return;
+      }
+
+      // Format the module data according to backend requirements
+      const moduleData = {
+        code: newModule.code,
+        name: newModule.name,
+        description: newModule.description || '',
+        academicYear: parseInt(newModule.academicYear),
+        semestre: newModule.semester,
+        specialityId: parseInt(newModule.specialityId),
+        palierId: selectedSpeciality.palierId,
+        yearId: selectedSpeciality.yearId
+      };
+
+      console.log('Sending module data:', moduleData);
+
+      const response = await api.post('/admin/modules', moduleData, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data.success) {
+        toast.success('Module added successfully');
+        // Add the new module to the list
+        setModules(prev => [...prev, response.data.data]);
+        // Reset the form
+        setNewModule({
+          code: '',
+          name: '',
+          description: '',
+          academicYear: 1,
+          semester: 'SEMESTRE1',
+          specialityId: null,
+          palierId: null,
+          yearId: null
+        });
+        setIsAddModuleDialogOpen(false);
+      } else {
+        toast.error(response.data.message || 'Failed to add module');
+      }
+    } catch (error) {
+      console.error('Error adding module:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to add module';
+      toast.error(errorMessage);
+    }
   };
 
   const handleEditModule = () => {
@@ -601,6 +664,13 @@ export default function Planning() {
         [field]: null
       }));
     }
+    // Reset section when speciality or year changes
+    if (field === 'speciality' || field === 'year') {
+      setFormData(prev => ({
+        ...prev,
+        section: ''
+      }));
+    }
   };
 
   // Add validation function
@@ -635,21 +705,20 @@ export default function Planning() {
       addProcessingLog(`Uploading ${formData.fileType.toUpperCase()} file...`, 'info');
 
       // Determine the endpoint based on file type
-      let endpoint = '/admin/extract-schedule';
+      let endpoint = 'admin/extract-schedule';
       if (formData.fileType === 'xlsx' || formData.fileType === 'xls') {
-        endpoint = '/admin/extract-excel';
+        endpoint = 'admin/extract-excel';
       } else if (formData.fileType === 'pdf') {
-        endpoint = '/admin/extract-pdf';
+        endpoint = 'admin/extract-pdf';
       }
 
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}${endpoint}`,
+      const response = await api.post(
+        endpoint,
         formDataToSend,
         {
           headers: {
-            'Content-Type': 'multipart/form-data',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
+            'Content-Type': 'multipart/form-data'
+          }
         }
       );
 
@@ -695,7 +764,7 @@ export default function Planning() {
     fileInputRef.current?.click();
   };
 
-  // Update handleFinalizeImport to handle the data structure correctly
+  // Update handleFinalizeImport function
   const handleFinalizeImport = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -704,169 +773,81 @@ export default function Planning() {
         return;
       }
 
-      // Validate only the essential form fields
       if (!formData.speciality || !formData.year || !formData.semester || !formData.section) {
-        toast.error('Please fill in all required fields (Speciality, Year, Semester, Section)');
+        toast.error('Please fill in all required fields');
         return;
       }
 
-      console.log('Starting import process...');
-      console.log('Form data:', {
-        speciality: formData.speciality,
-        year: formData.year,
-        semester: formData.semester,
-        section: formData.section
-      });
-      console.log('Raw extracted data:', extractedData);
-
-      if (!extractedData?.data?.scheduleEntries || !Array.isArray(extractedData.data.scheduleEntries)) {
-        console.error('Invalid extracted data structure:', extractedData);
-        toast.error('No valid schedule data to import');
+      if (!extractedData?.data?.scheduleEntries || extractedData.data.scheduleEntries.length === 0) {
+        toast.error('No schedule entries found to import');
         return;
       }
 
-      const scheduleEntries = extractedData.data.scheduleEntries;
-      if (scheduleEntries.length === 0) {
-        console.error('No schedule entries found');
-        toast.error('No schedule entries to import');
+      // Find the section in the database
+      const section = sections.find(s => 
+        s.name === formData.section && 
+        s.specialityId === parseInt(formData.speciality) &&
+        s.academicYear === parseInt(formData.year)
+      );
+
+      if (!section) {
+        toast.error('Selected section not found in database');
         return;
       }
 
-      // Log the first entry to verify structure
-      console.log('First schedule entry:', scheduleEntries[0]);
-
-      // Prepare the data for saving with more flexible field handling
+      // Format the schedule data
       const scheduleData = {
+        sectionId: section.id,
         specialityName: formData.speciality,
         academicYear: parseInt(formData.year),
         semester: formData.semester,
-        sectionName: formData.section,
-        scheduleEntries: scheduleEntries.map(entry => {
-          console.log('Processing entry:', entry);
-          
-          // Extract module name from content with fallback
-          const moduleMatch = entry.content?.match(/([^/]+)(?:\s*--\s*[A-Z]+)?/);
-          const moduleName = moduleMatch ? moduleMatch[1].trim() : entry.moduleName || 'Unknown Module';
-          
-          // Extract professor name with fallback
-          const professorMatch = entry.content?.match(/([A-Z-]+)$/);
-          const professorName = professorMatch ? professorMatch[1].trim() : entry.professorName || 'TBA';
-          
-          // Extract room number with fallback
-          const roomMatch = entry.content?.match(/(?:G\d+:)?(\d+[A-Z]?|[A-Z]\d+)/);
-          const roomNumber = roomMatch ? roomMatch[1].trim() : entry.roomNumber || 'TBA';
-          
-          // Extract group with fallback
-          const groupMatch = entry.content?.match(/G\d+/);
-          const group = groupMatch ? groupMatch[0] : entry.groups?.[0] || '';
-          
-          // Determine type with fallback
-          const type = entry.content?.includes('course') ? 'COURSE' : 
-                      entry.content?.includes('DW') ? 'TD' : 
-                      entry.content?.includes('PW') ? 'TP' : 
-                      entry.type || 'COURSE';
-
-          // Ensure day and timeSlot have fallbacks
-          const day = entry.day || 'MONDAY';
-          const timeSlot = entry.timeSlot || '08:00-09:30';
-
-          // Split timeSlot into start and end times
-          const [startTime, endTime] = timeSlot.split('-').map(t => t.trim());
-
-          const processedEntry = {
-            dayOfWeek: day,
-            startTime: startTime || '08:00',
-            endTime: endTime || '09:30',
-            moduleName: moduleName,
-            professorName: professorName,
-            roomNumber: roomNumber,
-            roomType: type,
-            groups: [group].filter(Boolean)
-          };
-
-          console.log('Processed entry:', processedEntry);
-          return processedEntry;
-        })
+        scheduleEntries: extractedData.data.scheduleEntries.map(entry => ({
+          dayOfWeek: entry.dayOfWeek,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+          moduleName: entry.moduleName,
+          professorName: entry.professorName,
+          roomNumber: entry.roomNumber,
+          roomType: entry.roomType || 'COURSE',
+          groups: entry.groups || []
+        }))
       };
 
-      console.log('Final schedule data being sent to server:', scheduleData);
+      console.log('Sending schedule data:', scheduleData);
 
-      const importResponse = await axios.post(
-        `${import.meta.env.VITE_API_URL}/admin/schedules/section/bulk`,
-        {
-          specialityName: formData.speciality,
-          academicYear: formData.year,
-          semester: formData.semester,
-          sectionName: formData.section,
-          scheduleEntries: scheduleEntries,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
+      const response = await api.post('/admin/schedules/section/bulk', scheduleData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-      );
+      });
 
-      console.log('Import response:', importResponse.data);
-
-      if (importResponse.data.success) {
+      if (response.data.success) {
         toast.success('Schedule imported successfully');
+        setExtractedData(null);
+        setActiveTab('section-schedules');
         
-        // Immediately fetch the updated schedules
-        try {
-          console.log('Fetching updated schedules...');
-          const updatedResponse = await api.get('/admin/schedules/section', {
-            params: {
-              section: formData.section,
-              speciality: formData.speciality,
-              year: formData.year,
-              semester: formData.semester
-            },
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          
-          console.log('Updated schedules response:', updatedResponse.data);
-          
-          if (updatedResponse.data.success) {
-            setSectionSchedules(updatedResponse.data.schedules || []);
-            console.log('Schedules updated in state:', updatedResponse.data.schedules);
-            
-            // Clear the extracted data and form
-            setExtractedData(null);
-            setSelectedFile(null);
-            setFormData({
-              semester: '',
-              year: '',
-              speciality: '',
-              section: '',
-              fileType: 'docx'
-            });
-            
-            // Switch to the section schedules tab
-            const tabsList = document.querySelector('[role="tablist"]');
-            const sectionSchedulesTab = tabsList?.querySelector('[value="section-schedules"]');
-            if (sectionSchedulesTab) {
-              sectionSchedulesTab.click();
-            }
+        // Refresh the schedules list
+        const updatedResponse = await api.get('/admin/schedules/section', {
+          params: {
+            section: formData.section,
+            speciality: formData.speciality,
+            year: parseInt(formData.year),
+            semester: formData.semester
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`
           }
-        } catch (error) {
-          console.error('Error fetching updated schedules:', error);
-          toast.error('Schedule imported but failed to refresh the view');
+        });
+        
+        if (updatedResponse.data.success) {
+          setSectionSchedules(updatedResponse.data.scheduleSlots);
         }
       } else {
-        console.error('Server returned error:', importResponse.data);
-        toast.error(importResponse.data.message || 'Failed to import schedule');
+        toast.error(response.data.message || 'Failed to import schedule');
       }
     } catch (error) {
       console.error('Error importing schedule:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
       toast.error(error.response?.data?.message || 'Failed to import schedule');
     }
   };
@@ -1125,7 +1106,12 @@ export default function Planning() {
   useEffect(() => {
     const fetchSchedules = async () => {
       if (!formData.section || !formData.speciality || !formData.year || !formData.semester) {
-        console.log('Missing required fields:', { formData });
+        console.log('Missing required fields:', {
+          section: formData.section,
+          speciality: formData.speciality,
+          year: formData.year,
+          semester: formData.semester
+        });
         return;
       }
 
@@ -1155,11 +1141,20 @@ export default function Planning() {
           }
         });
 
-        console.log('Schedules API Response:', response.data);
+        console.log('API Response:', response.data);
 
         if (response.data.success) {
-          const schedules = response.data.schedules || [];
+          const schedules = response.data.scheduleSlots || [];
           console.log('Setting schedules:', schedules);
+          console.log('Schedule structure:', schedules.map(s => ({
+            id: s.id,
+            dayOfWeek: s.dayOfWeek,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            module: s.module,
+            owner: s.owner,
+            room: s.room
+          })));
           setSectionSchedules(schedules);
         } else {
           console.error('Failed to fetch schedules:', response.data.message);
@@ -1167,6 +1162,11 @@ export default function Planning() {
         }
       } catch (error) {
         console.error('Error fetching schedules:', error);
+        console.error('Error details:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status
+        });
         toast.error(error.response?.data?.message || 'Failed to fetch schedules');
       }
     };
@@ -1189,6 +1189,180 @@ export default function Planning() {
     };
 
     fetchClassrooms();
+  }, []);
+
+  // Add useEffect to fetch schedules when filters change
+  useEffect(() => {
+    const fetchSchedules = async () => {
+      if (selectedSection && formData.speciality && formData.year && formData.semester) {
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) {
+            toast.error('Please log in to access this feature');
+            return;
+          }
+
+          console.log('Fetching schedules with params:', {
+            section: selectedSection,
+            speciality: formData.speciality,
+            year: formData.year,
+            semester: formData.semester
+          });
+
+          const response = await api.get('/admin/schedules/section', {
+            params: {
+              section: selectedSection,
+              speciality: formData.speciality,
+              year: formData.year,
+              semester: formData.semester
+            },
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          console.log('API Response:', response.data);
+
+          if (response.data.success) {
+            console.log('Setting schedules:', response.data.scheduleSlots);
+            setSectionSchedules(response.data.scheduleSlots);
+          } else {
+            console.error('Failed to fetch schedules:', response.data.message);
+            toast.error(response.data.message || 'Failed to fetch schedules');
+          }
+        } catch (error) {
+          console.error('Error fetching schedules:', error);
+          console.error('Error details:', {
+            message: error.message,
+            response: error.response?.data,
+            status: error.response?.status
+          });
+          toast.error(error.response?.data?.message || 'Failed to fetch schedules');
+        }
+      } else {
+        console.log('Missing required fields:', {
+          selectedSection,
+          speciality: formData.speciality,
+          year: formData.year,
+          semester: formData.semester
+        });
+      }
+    };
+
+    fetchSchedules();
+  }, [selectedSection, formData.speciality, formData.year, formData.semester]);
+
+  // Section management functions
+  const fetchSections = async () => {
+    try {
+      const response = await api.get('/admin/sections');
+      if (response.data.success) {
+        setSections(response.data.sections);
+      } else {
+        toast.error(response.data.message || 'Failed to fetch sections');
+      }
+    } catch (error) {
+      console.error('Error fetching sections:', error);
+      toast.error('Failed to fetch sections');
+    }
+  };
+
+  const handleAddSection = async () => {
+    try {
+      if (!newSection.name || !newSection.specialityId || !newSection.academicYear) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
+
+      const response = await api.post('/admin/sections', {
+        name: newSection.name,
+        specialityId: parseInt(newSection.specialityId),
+        academicYear: parseInt(newSection.academicYear)
+      });
+      
+      if (response.data.success) {
+        toast.success('Section added successfully');
+        setSections(prev => [...prev, response.data.data]);
+        setIsAddSectionDialogOpen(false);
+        setNewSection({ 
+          name: '', 
+          specialityId: null,
+          academicYear: 1
+        });
+      } else {
+        toast.error(response.data.message || 'Failed to add section');
+      }
+    } catch (error) {
+      console.error('Error adding section:', error);
+      toast.error(error.response?.data?.message || 'Failed to add section');
+    }
+  };
+
+  const handleEditSection = async () => {
+    if (!selectedSection) return;
+    try {
+      const response = await api.put(`/admin/sections/${selectedSection.id}`, {
+        name: newSection.name,
+        specialityId: parseInt(newSection.specialityId),
+        academicYear: parseInt(newSection.academicYear)
+      });
+      
+      if (response.data.success) {
+        setSections(prev => prev.map(section => 
+          section.id === selectedSection.id ? response.data.section : section
+        ));
+        setIsEditSectionDialogOpen(false);
+        setSelectedSection(null);
+        setNewSection({ 
+          name: '', 
+          specialityId: null,
+          academicYear: 1
+        });
+        toast.success('Section updated successfully');
+      } else {
+        toast.error(response.data.message || 'Failed to update section');
+      }
+    } catch (error) {
+      console.error('Error updating section:', error);
+      toast.error(error.response?.data?.message || 'Failed to update section');
+    }
+  };
+
+  const handleDeleteSection = async () => {
+    if (!selectedSection) return;
+    try {
+      const response = await api.delete(`/admin/sections/${selectedSection.id}`);
+      if (response.data.success) {
+        setSections(prev => prev.filter(section => section.id !== selectedSection.id));
+        setIsDeleteSectionDialogOpen(false);
+        setSelectedSection(null);
+        toast.success('Section deleted successfully');
+      } else {
+        toast.error(response.data.message || 'Failed to delete section');
+      }
+    } catch (error) {
+      console.error('Error deleting section:', error);
+      toast.error('Failed to delete section');
+    }
+  };
+
+  const handleEditSectionClick = (section) => {
+    setSelectedSection(section);
+    setNewSection({
+      name: section.name,
+      specialityId: section.specialityId,
+      academicYear: section.academicYear
+    });
+    setIsEditSectionDialogOpen(true);
+  };
+
+  const handleDeleteSectionClick = (section) => {
+    setSelectedSection(section);
+    setIsDeleteSectionDialogOpen(true);
+  };
+
+  useEffect(() => {
+    fetchSections();
   }, []);
 
   return (
@@ -1289,17 +1463,11 @@ export default function Planning() {
                         <SelectValue placeholder="Select section" />
                       </SelectTrigger>
                       <SelectContent>
-                      <SelectItem value="A">Section A</SelectItem>
-                        <SelectItem value="B">Section B</SelectItem>
-                        <SelectItem value="C">Section C</SelectItem>
-                        <SelectItem value="D">Section D</SelectItem>
-                        <SelectItem value="1">Section D</SelectItem>
-                        <SelectItem value="2">Section D</SelectItem>
-                        <SelectItem value="3">Section D</SelectItem>  
-                        <SelectItem value="4">Section D</SelectItem>
-                        <SelectItem value="5">Section D</SelectItem>
-                        <SelectItem value="6">Section D</SelectItem>
-                        <SelectItem value="7">Section D</SelectItem>
+                        {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((section) => (
+                          <SelectItem key={section} value={section}>
+                            Section {section}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     {formErrors.section && (
@@ -1413,11 +1581,11 @@ export default function Planning() {
             </CardHeader>
             <CardContent>
               <Tabs defaultValue="classrooms">
-                <TabsList className="grid w-full grid-cols-3 mb-6">
+                <TabsList className="grid w-full grid-cols-4 mb-6">
                   <TabsTrigger value="classrooms">Classrooms</TabsTrigger>
                   <TabsTrigger value="schedules">Schedules</TabsTrigger>
                   <TabsTrigger value="modules">Modules</TabsTrigger>
-                  <TabsTrigger value="section-schedules">Section Schedules</TabsTrigger>
+                  <TabsTrigger value="sections">Sections</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="classrooms" className="space-y-4">
@@ -1445,6 +1613,7 @@ export default function Planning() {
                               value={newClassroom.name}
                               onChange={(e) => setNewClassroom(prev => ({ ...prev, name: e.target.value }))}
                               className="col-span-3"
+                              placeholder="e.g., Amphitheatre 1"
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
@@ -1454,6 +1623,7 @@ export default function Planning() {
                               value={newClassroom.number}
                               onChange={(e) => setNewClassroom(prev => ({ ...prev, number: e.target.value }))}
                               className="col-span-3"
+                              placeholder="e.g., A101"
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
@@ -1468,7 +1638,7 @@ export default function Planning() {
                               <SelectContent>
                                 <SelectItem value="SALLE_COURS">Lecture Room</SelectItem>
                                 <SelectItem value="SALLE_TP">Lab Room</SelectItem>
-                                <SelectItem value="AMPHI">Amphitheater</SelectItem>
+                                <SelectItem value="SALLE_TD">Tutorial Room</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -1480,6 +1650,7 @@ export default function Planning() {
                               value={newClassroom.capacity}
                               onChange={(e) => setNewClassroom(prev => ({ ...prev, capacity: e.target.value }))}
                               className="col-span-3"
+                              placeholder="Enter room capacity"
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
@@ -1490,6 +1661,7 @@ export default function Planning() {
                               value={newClassroom.floor}
                               onChange={(e) => setNewClassroom(prev => ({ ...prev, floor: e.target.value }))}
                               className="col-span-3"
+                              placeholder="Enter floor number"
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
@@ -1499,6 +1671,7 @@ export default function Planning() {
                               value={newClassroom.building}
                               onChange={(e) => setNewClassroom(prev => ({ ...prev, building: e.target.value }))}
                               className="col-span-3"
+                              placeholder="Enter building name"
                             />
                           </div>
                         </div>
@@ -1920,7 +2093,7 @@ export default function Planning() {
                                     {selectedSchedule && (
                                       <div className="py-4">
                                         <p className="text-sm text-gray-500">
-                                          You are about to delete schedule for {selectedSchedule.module} ({selectedSchedule.day} {selectedSchedule.time}).
+                                          You are about to delete the schedule for {selectedSchedule.module} ({selectedSchedule.day} {selectedSchedule.time}).
                                         </p>
                                       </div>
                                     )}
@@ -1949,44 +2122,59 @@ export default function Planning() {
                           Add New Module
                         </Button>
                       </DialogTrigger>
-                      <DialogContent className="bg-white">
+                      <DialogContent>
                         <DialogHeader>
                           <DialogTitle>Add New Module</DialogTitle>
                           <DialogDescription>
-                            Fill in the module details.
+                            Create a new module with all required information
                           </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="code" className="text-right">Code</Label>
+                            <Label htmlFor="code" className="text-right">Code *</Label>
                             <Input
                               id="code"
                               value={newModule.code}
                               onChange={(e) => setNewModule(prev => ({ ...prev, code: e.target.value }))}
                               className="col-span-3"
+                              placeholder="e.g., CS101"
+                              required
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="name" className="text-right">Name</Label>
+                            <Label htmlFor="name" className="text-right">Name *</Label>
                             <Input
                               id="name"
                               value={newModule.name}
                               onChange={(e) => setNewModule(prev => ({ ...prev, name: e.target.value }))}
                               className="col-span-3"
+                              placeholder="e.g., Introduction to Programming"
+                              required
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="speciality" className="text-right">Speciality</Label>
+                            <Label htmlFor="description" className="text-right">Description</Label>
+                            <Input
+                              id="description"
+                              value={newModule.description}
+                              onChange={(e) => setNewModule(prev => ({ ...prev, description: e.target.value }))}
+                              className="col-span-3"
+                              placeholder="Enter module description"
+                            />
+                          </div>
+                          <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="speciality" className="text-right">Speciality *</Label>
                             <Select
-                              value={newModule.speciality}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, speciality: value }))}
+                              value={newModule.specialityId?.toString()}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, specialityId: parseInt(value) }))}
+                              required
                             >
                               <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select speciality" />
                               </SelectTrigger>
                               <SelectContent>
                                 {specialities.map((speciality) => (
-                                  <SelectItem key={speciality.id} value={speciality.name}>
+                                  <SelectItem key={speciality.id} value={speciality.id.toString()}>
                                     {speciality.name}
                                   </SelectItem>
                                 ))}
@@ -1994,10 +2182,11 @@ export default function Planning() {
                             </Select>
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="year" className="text-right">Year</Label>
+                            <Label htmlFor="academicYear" className="text-right">Academic Year *</Label>
                             <Select
-                              value={newModule.year.toString()}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, year: parseInt(value) }))}
+                              value={newModule.academicYear.toString()}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, academicYear: parseInt(value) }))}
+                              required
                             >
                               <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select year" />
@@ -2012,10 +2201,11 @@ export default function Planning() {
                             </Select>
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="semester" className="text-right">Semester</Label>
+                            <Label htmlFor="semestre" className="text-right">Semester *</Label>
                             <Select
                               value={newModule.semester}
                               onValueChange={(value) => setNewModule(prev => ({ ...prev, semester: value }))}
+                              required
                             >
                               <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select semester" />
@@ -2027,18 +2217,38 @@ export default function Planning() {
                             </Select>
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="palier" className="text-right">Palier</Label>
+                            <Label htmlFor="palier" className="text-right">Palier *</Label>
                             <Select
-                              value={newModule.palier}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, palier: value }))}
+                              value={newModule.palierId?.toString()}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, palierId: parseInt(value) }))}
+                              required
                             >
                               <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select palier" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="LMD">LMD</SelectItem>
-                                <SelectItem value="ING">ING</SelectItem>
-                                <SelectItem value="SIGL">SIGL</SelectItem>
+                                <SelectItem value="1">LMD</SelectItem>
+                                <SelectItem value="2">ING</SelectItem>
+                                <SelectItem value="3">SIGL</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="year" className="text-right">Year *</Label>
+                            <Select
+                              value={newModule.yearId?.toString()}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, yearId: parseInt(value) }))}
+                              required
+                            >
+                              <SelectTrigger className="col-span-3">
+                                <SelectValue placeholder="Select year" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="1">L1</SelectItem>
+                                <SelectItem value="2">L2</SelectItem>
+                                <SelectItem value="3">L3</SelectItem>
+                                <SelectItem value="4">M1</SelectItem>
+                                <SelectItem value="5">M2</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -2227,6 +2437,180 @@ export default function Planning() {
                       </tbody>
                     </table>
                   </div>
+        </TabsContent>
+
+                <TabsContent value="sections" className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Section Management</h3>
+                        <Button 
+                      onClick={() => setIsAddSectionDialogOpen(true)}
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Section
+                        </Button>
+                      </div>
+
+                  {/* Section List */}
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                          <th className="px-4 py-3 text-left font-medium text-gray-500">Name</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-500">Speciality</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-500">Academic Year</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                        {sections.map((section) => (
+                          <tr key={section.id} className="border-b hover:bg-gray-50">
+                            <td className="px-4 py-3">Section {section.name}</td>
+                            <td className="px-4 py-3">
+                              {specialities.find(s => s.id === section.specialityId)?.name || 'N/A'}
+                            </td>
+                            <td className="px-4 py-3">Year {section.academicYear}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleEditSectionClick(section)}
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteSectionClick(section)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                  </tbody>
+                </table>
+              </div>
+
+                  {/* Add/Edit Section Dialog */}
+                  <Dialog open={isAddSectionDialogOpen || isEditSectionDialogOpen} onOpenChange={isEditSectionDialogOpen ? setIsEditSectionDialogOpen : setIsAddSectionDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                        <DialogTitle>{isEditSectionDialogOpen ? 'Edit Section' : 'Add Section'}</DialogTitle>
+                <DialogDescription>
+                          {isEditSectionDialogOpen ? 'Edit the section details.' : 'Add a new section.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                          <Label htmlFor="section-name">Section Name</Label>
+                  <Input
+                            id="section-name"
+                            value={newSection.name}
+                            onChange={(e) => setNewSection(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="Enter section name (e.g., A, B, C)"
+                  />
+                </div>
+                <div className="grid gap-2">
+                          <Label htmlFor="section-speciality">Speciality</Label>
+                  <Select
+                            value={newSection.specialityId}
+                            onValueChange={(value) => setNewSection(prev => ({ ...prev, specialityId: parseInt(value) }))}
+                  >
+                            <SelectTrigger id="section-speciality">
+                      <SelectValue placeholder="Select speciality" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredSpecialities.map(speciality => (
+                                <SelectItem key={speciality.id} value={speciality.id.toString()}>
+                          {speciality.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                          <Label htmlFor="section-year">Academic Year</Label>
+                  <Select
+                            value={newSection.academicYear.toString()}
+                            onValueChange={(value) => setNewSection(prev => ({ ...prev, academicYear: parseInt(value) }))}
+                  >
+                            <SelectTrigger id="section-year">
+                              <SelectValue placeholder="Select year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                              <SelectItem value="1">First Year</SelectItem>
+                              <SelectItem value="2">Second Year</SelectItem>
+                              <SelectItem value="3">Third Year</SelectItem>
+                              <SelectItem value="4">Fourth Year</SelectItem>
+                              <SelectItem value="5">Fifth Year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                          <Label htmlFor="section-module">Module</Label>
+                  <Select
+                            value={newSection.moduleId}
+                            onValueChange={(value) => setNewSection(prev => ({ ...prev, moduleId: parseInt(value) }))}
+                  >
+                            <SelectTrigger id="section-module">
+                      <SelectValue placeholder="Select module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modules
+                        .filter(module => 
+                          module.specialityId === newSection.specialityId && 
+                          module.academicYear === newSection.academicYear
+                        )
+                        .map(module => (
+                          <SelectItem key={module.id} value={module.id.toString()}>
+                            {module.code} - {module.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                          isEditSectionDialogOpen ? setIsEditSectionDialogOpen(false) : setIsAddSectionDialogOpen(false);
+                }}>
+                  Cancel
+                </Button>
+                <Button 
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                          onClick={isEditSectionDialogOpen ? handleEditSection : handleAddSection}
+                >
+                          {isEditSectionDialogOpen ? 'Save Changes' : 'Add Section'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+                  {/* Delete Section Dialog */}
+                  <Dialog open={isDeleteSectionDialogOpen} onOpenChange={setIsDeleteSectionDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                        <DialogTitle>Delete Section</DialogTitle>
+                <DialogDescription>
+                          Are you sure you want to delete this section? This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsDeleteSectionDialogOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button 
+                          variant="destructive"
+                          onClick={handleDeleteSection}
+                        >
+                          Delete
+                        </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
                 </TabsContent>
               </Tabs>
             </CardContent>
@@ -2237,220 +2621,148 @@ export default function Planning() {
           <Card className="hover:shadow-md transition-all duration-200">
             <CardHeader>
               <CardTitle className="text-lg">Preview Extracted Schedule</CardTitle>
-              <CardDescription>Review and validate the extracted schedule data before finalizing</CardDescription>
+              <CardDescription>Review and validate the extracted schedule data before importing</CardDescription>
             </CardHeader>
             <CardContent>
               {extractedData ? (
                 <div className="space-y-6">
-                  <div className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-5 w-5 text-emerald-600" />
-                      <div>
-                        <div className="font-medium">{selectedFile?.name}</div>
-                        <div className="text-xs text-gray-500">Processed successfully</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={handleBrowseClick}>
-                        Upload New File
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
-                      <div className="font-medium">Extracted Schedule Data</div>
-                      <div className="flex gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => {
-                            toast.error('Report submitted');
-                          }}
-                        >
-                          <AlertCircle className="h-4 w-4 mr-1" /> Report Issues
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          className="bg-emerald-600 hover:bg-emerald-700"
-                          onClick={handleFinalizeImport}
-                          disabled={isProcessing}
-                        >
-                          {isProcessing ? 'Importing...' : 'Finalize & Import'}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                      {/* Processing Information */}
-                      <div className="border-b p-4 bg-gray-50">
-                        <div className="font-medium mb-2">Processing Information</div>
-                        <div className="text-sm space-y-1">
-                          <div className="text-gray-600">
-                            <span className="font-medium">File Type:</span> {formData.fileType.toUpperCase()}
-                          </div>
-                          <div className="text-gray-600">
-                            <span className="font-medium">Total Entries:</span> {extractedData?.data?.scheduleEntries?.length || 0}
-                          </div>
-                          {extractedData?.data?.headerInfo && (
-                            <div className="text-gray-600">
-                              <span className="font-medium">Header Info:</span>
-                              <ul className="list-disc list-inside ml-2">
-                                {Object.entries(extractedData.data.headerInfo).map(([key, value]) => (
-                                  value && <li key={key}>{key}: {value}</li>
-                                ))}
-                              </ul>
+                  {/* Header Information */}
+                  {extractedData.data.headerInfo && (
+                    <div className="rounded-lg border p-4 bg-gray-50">
+                      <h3 className="font-medium mb-2">Header Information</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        {Object.entries(extractedData.data.headerInfo).map(([key, value]) => (
+                          value && (
+                            <div key={key} className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-500">{key}:</span>
+                              <span className="text-sm">{value}</span>
                             </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Schedule Table */}
-                      <div className="p-4">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b">
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Day</th>
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Time Slot</th>
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Professor</th>
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Group</th>
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
-                              <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {extractedData?.data?.scheduleEntries?.map((entry, index) => {
-                              // Log each entry for debugging
-                              console.log('Rendering schedule entry:', entry);
-                              
-                              return (
-                                <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
-                                  <td className="px-4 py-3">{entry.dayOfWeek}</td>
-                                  <td className="px-4 py-3">{`${entry.startTime} - ${entry.endTime}`}</td>
-                                  <td className="px-4 py-3">{entry.moduleName || '-'}</td>
-                                  <td className="px-4 py-3">{entry.professorName || '-'}</td>
-                                  <td className="px-4 py-3">{entry.sectionName || '-'}</td>
-                                  <td className="px-4 py-3">{entry.roomNumber || '-'}</td>
-                                  <td className="px-4 py-3">{entry.roomType || '-'}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                        {(!extractedData?.data?.scheduleEntries || extractedData.data.scheduleEntries.length === 0) && (
-                          <div className="text-center py-8 text-gray-500">
-                            No schedule entries found in the processed file
-                          </div>
-                        )}
+                          )
+                        ))}
                       </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* Schedule Entries */}
+                  {extractedData.data.scheduleEntries && extractedData.data.scheduleEntries.length > 0 ? (
+                    <div className="rounded-lg border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 border-b">
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Day</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Module</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Professor</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Room</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
+                            <th className="px-4 py-3 text-left font-medium text-gray-500">Groups</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {extractedData.data.scheduleEntries.map((entry, index) => (
+                            <tr key={index} className="border-b hover:bg-gray-50">
+                              <td className="px-4 py-3">{entry.dayOfWeek}</td>
+                              <td className="px-4 py-3">{`${entry.startTime} - ${entry.endTime}`}</td>
+                              <td className="px-4 py-3">{entry.moduleName}</td>
+                              <td className="px-4 py-3">{entry.professorName}</td>
+                              <td className="px-4 py-3">{entry.roomNumber}</td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                  entry.roomType === 'COURSE' ? 'bg-blue-100 text-blue-800' :
+                                  entry.roomType === 'TD' ? 'bg-green-100 text-green-800' :
+                                  entry.roomType === 'TP' ? 'bg-purple-100 text-purple-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {entry.roomType}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {entry.groups?.map((group, i) => (
+                                  <span key={i} className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-800 mr-1">
+                                    {group}
+                                  </span>
+                                ))}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      No schedule entries found in the extracted data.
+                    </div>
+                  )}
+
+                  {/* Processing Logs */}
+                  {processingLogs.length > 0 && (
+                    <div className="rounded-lg border p-4 bg-gray-50">
+                      <h3 className="font-medium mb-2">Processing Logs</h3>
+                      <div className="space-y-2">
+                        {processingLogs.map((log, index) => (
+                          <div key={index} className={`text-sm ${
+                            log.type === 'error' ? 'text-red-600' :
+                            log.type === 'success' ? 'text-green-600' :
+                            'text-gray-600'
+                          }`}>
+                            {log.message}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="text-center py-8">
-                  <p className="text-gray-500">Upload a schedule file to preview extracted data</p>
+                <div className="text-center py-8 text-gray-500">
+                  No data to preview. Please upload and process a schedule file first.
                 </div>
               )}
             </CardContent>
+            <CardFooter className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => {
+                setExtractedData(null);
+                setProcessingLogs([]);
+                setActiveTab('upload');
+              }}>
+                Back to Upload
+              </Button>
+              {extractedData && (
+                <Button 
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={handleFinalizeImport}
+                  disabled={!formData.speciality || !formData.year || !formData.semester || !formData.section}
+                >
+                  Import Schedule
+                </Button>
+              )}
+            </CardFooter>
           </Card>
         </TabsContent>
 
-        <TabsContent value="history" className="space-y-6">
+        <TabsContent value="specialities" className="space-y-6">
           <Card className="hover:shadow-md transition-all duration-200">
             <CardHeader>
-              <CardTitle className="text-lg">Upload History</CardTitle>
-              <CardDescription>Previous schedule uploads and their processing status</CardDescription>
+              <CardTitle className="text-lg">Specialities Management</CardTitle>
+              <CardDescription>View and manage all specialities in the system</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="rounded-lg border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b">
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">File Name</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Uploaded By</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Date</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Semester</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Name</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Description</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Palier</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Year</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[
-                      {
-                        fileName: "Fall2023_Schedule.docx",
-                        uploadedBy: "Admin User",
-                        date: "Oct 15, 2023",
-                        semester: "Fall 2023",
-                        status: "Processed",
-                      },
-                      {
-                        fileName: "CS_Department_Spring2024.xlsx",
-                        uploadedBy: "Admin User",
-                        date: "Oct 10, 2023",
-                        semester: "Spring 2024",
-                        status: "Processed",
-                      },
-                      {
-                        fileName: "Math_Department_Fall2023.docx",
-                        uploadedBy: "Department Head",
-                        date: "Sep 28, 2023",
-                        semester: "Fall 2023",
-                        status: "Processed",
-                      },
-                      {
-                        fileName: "Engineering_Spring2024.docx",
-                        uploadedBy: "Admin User",
-                        date: "Sep 20, 2023",
-                        semester: "Spring 2024",
-                        status: "Failed",
-                      },
-                      {
-                        fileName: "Summer2023_AllDepartments.xlsx",
-                        uploadedBy: "System Admin",
-                        date: "May 15, 2023",
-                        semester: "Summer 2023",
-                        status: "Processed",
-                      },
-                    ].map((item, index) => (
-                      <tr key={index} className={`border-b ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
-                        <td className="px-4 py-3 flex items-center gap-2">
-                          {item.fileName.endsWith(".docx") ? (
-                            <FileText className="h-4 w-4 text-blue-500" />
-                          ) : (
-                            <FileSpreadsheet className="h-4 w-4 text-green-500" />
-                          )}
-                          {item.fileName}
-                        </td>
-                        <td className="px-4 py-3">{item.uploadedBy}</td>
-                        <td className="px-4 py-3">{item.date}</td>
-                        <td className="px-4 py-3">{item.semester}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              item.status === "Processed" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                            }`}
-                          >
-                            {item.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                            >
-                              View
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                            >
-                              Download
-                            </Button>
-                          </div>
-                        </td>
+                    {specialities.map((speciality) => (
+                      <tr key={speciality.id} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-3">{speciality.name}</td>
+                        <td className="px-4 py-3">{speciality.description || 'N/A'}</td>
+                        <td className="px-4 py-3">{speciality.palier?.name || 'N/A'}</td>
+                        <td className="px-4 py-3">{speciality.year?.name || 'N/A'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -2458,372 +2770,6 @@ export default function Planning() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="specialities" className="space-y-6">
-          <Card className="hover:shadow-md transition-all duration-200">
-            <CardHeader>
-              <CardTitle className="text-lg">Manage Specialities</CardTitle>
-              <CardDescription>Upload Excel file containing paliers and specialities</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center">
-                  <div className="mb-4 rounded-full bg-emerald-50 p-3">
-                    <Database className="h-6 w-6 text-emerald-600" />
-                  </div>
-                  <h3 className="text-lg font-medium mb-2">Upload Specialities Excel File</h3>
-                  <p className="text-sm text-gray-500 mb-4">Upload an Excel file containing paliers and specialities</p>
-                  <div className="flex gap-2 mb-4">
-                    <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 flex items-center">
-                      <FileSpreadsheet className="h-3 w-3 mr-1" /> XLSX
-                    </div>
-                  </div>
-                  <input
-                    type="file"
-                    accept=".xlsx"
-                    onChange={(e) => setSpecialityFile(e.target.files[0])}
-                    className="hidden"
-                    id="speciality-file"
-                  />
-                  <Button 
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                    onClick={() => document.getElementById('speciality-file').click()}
-                    disabled={isUploadingSpecialities}
-                  >
-                    {isUploadingSpecialities ? 'Uploading...' : 'Browse Files'}
-                  </Button>
-                  {specialityFile && (
-                    <div className="mt-4 p-3 bg-emerald-50 rounded-lg flex items-center gap-2">
-                      <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                      <span className="text-sm text-emerald-700">{specialityFile.name}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-lg border p-4 bg-blue-50 text-blue-800 flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <h4 className="font-medium">File Requirements</h4>
-                    <p className="text-sm mt-1">
-                      The Excel file should contain the following columns:
-                    </p>
-                    <ul className="list-disc list-inside mt-2 text-sm">
-                      <li>Palier (LMD, ING, SIGL)</li>
-                      <li>Specialités (Speciality names)</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  <Button 
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                    onClick={handleSpecialityFileUpload}
-                    disabled={!specialityFile || isUploadingSpecialities}
-                  >
-                    {isUploadingSpecialities ? 'Uploading...' : 'Upload & Process'}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="section-schedules" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-medium">Section Schedule Management</h3>
-            <Button 
-              onClick={() => setIsAddSectionScheduleDialogOpen(true)}
-              className="bg-emerald-600 hover:bg-emerald-700"
-              disabled={!selectedSection || !formData.speciality || !formData.year || !formData.semester}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Schedule
-            </Button>
-          </div>
-
-          {/* Section Selection */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="year-select">Year</Label>
-              <Select 
-                value={formData.year} 
-                onValueChange={(value) => handleFormChange('year', value)}
-              >
-                <SelectTrigger id="year-select">
-                  <SelectValue placeholder="Select year" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">First Year</SelectItem>
-                  <SelectItem value="2">Second Year</SelectItem>
-                  <SelectItem value="3">Third Year</SelectItem>
-                  <SelectItem value="4">Fourth Year</SelectItem>
-                  <SelectItem value="5">Fifth Year</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="speciality-select">Speciality</Label>
-              <Select 
-                value={formData.speciality} 
-                onValueChange={(value) => handleFormChange('speciality', value)}
-                disabled={!formData.year}
-              >
-                <SelectTrigger id="speciality-select">
-                  <SelectValue placeholder="Select speciality" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredSpecialities.map((speciality) => (
-                    <SelectItem key={speciality.id} value={speciality.name}>
-                      {speciality.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="section-select">Section</Label>
-              <Select 
-                value={selectedSection} 
-                onValueChange={setSelectedSection}
-                disabled={!formData.speciality || !formData.year}
-              >
-                <SelectTrigger id="section-select">
-                  <SelectValue placeholder="Select a section" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="A">Section A</SelectItem>
-                  <SelectItem value="B">Section B</SelectItem>
-                  <SelectItem value="C">Section C</SelectItem>
-                  <SelectItem value="D">Section D</SelectItem>
-                  <SelectItem value="1">Section 1</SelectItem>
-                  <SelectItem value="2">Section 2</SelectItem>
-                  <SelectItem value="3">Section 3</SelectItem>
-                  <SelectItem value="4">Section 4</SelectItem>
-                  <SelectItem value="5">Section 5</SelectItem>
-                  <SelectItem value="6">Section 6</SelectItem>
-                  <SelectItem value="7">Section 7</SelectItem>
-                </SelectContent>
-              </Select>
-              {!formData.speciality || !formData.year ? (
-                 <p className="text-sm text-gray-500">Select Speciality and Year to load sections.</p>
-              ) : null}
-            </div>
-          </div>
-
-          {/* Schedule Table */}
-          <div className="rounded-md border">
-            <div className="relative w-full overflow-auto">
-              <table className="w-full caption-bottom text-sm">
-                <thead className="[&_tr]:border-b">
-                  <tr className="border-b transition-colors hover:bg-gray-50/50 data-[state=selected]:bg-gray-50">
-                    <th className="h-12 px-4 text-left align-middle font-medium">Day</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Time Slot</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Module</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Professor</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Room</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Type</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Groups</th>
-                    <th className="h-12 px-4 text-left align-middle font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="[&_tr:last-child]:border-0">
-                  {sectionSchedules && sectionSchedules.length > 0 ? (
-                    sectionSchedules.map((schedule, index) => (
-                      <tr key={index} className="border-b transition-colors hover:bg-gray-50/50 data-[state=selected]:bg-gray-50">
-                        <td className="p-4 align-middle">{schedule.day}</td>
-                        <td className="p-4 align-middle">{schedule.timeSlot}</td>
-                        <td className="p-4 align-middle">{schedule.module}</td>
-                        <td className="p-4 align-middle">{schedule.professor}</td>
-                        <td className="p-4 align-middle">{schedule.room}</td>
-                        <td className="p-4 align-middle">{schedule.type}</td>
-                        <td className="p-4 align-middle">
-                          {Array.isArray(schedule.groups) ? schedule.groups.join(', ') : schedule.groups}
-                        </td>
-                        <td className="p-4 align-middle">
-                          <div className="flex gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEditSectionScheduleClick(schedule)}
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteSectionScheduleClick(schedule)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="8" className="p-4 text-center text-gray-500">
-                        {!formData.section || !formData.speciality || !formData.year || !formData.semester ? (
-                          'Please select all required fields to view schedules'
-                        ) : (
-                          'No schedules found for the selected criteria'
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Add/Edit Section Schedule Dialog */}
-          <Dialog open={isAddSectionScheduleDialogOpen || isEditSectionScheduleDialogOpen} onOpenChange={isEditSectionScheduleDialogOpen ? setIsEditSectionScheduleDialogOpen : setIsAddSectionScheduleDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{isEditSectionScheduleDialogOpen ? 'Edit Section Schedule' : 'Add Section Schedule'}</DialogTitle>
-                <DialogDescription>
-                  {isEditSectionScheduleDialogOpen ? 'Edit the schedule entry.' : 'Add a new schedule entry for the selected section.'}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="day">Day</Label>
-                  <Select
-                    value={newSectionSchedule.day}
-                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, day: value }))}
-                  >
-                    <SelectTrigger id="day">
-                      <SelectValue placeholder="Select day" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'].map(day => (
-                        <SelectItem key={day} value={day}>{day}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="timeSlot">Time Slot</Label>
-                  <Input
-                    id="timeSlot"
-                    value={newSectionSchedule.timeSlot}
-                    onChange={(e) => setNewSectionSchedule(prev => ({ ...prev, timeSlot: e.target.value }))}
-                    placeholder="e.g., 10:00 - 12:00"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="module">Module</Label>
-                  <Select
-                    value={newSectionSchedule.module}
-                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, module: value }))}
-                  >
-                    <SelectTrigger id="module">
-                      <SelectValue placeholder="Select module" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modules.map(module => (
-                        <SelectItem key={module.id} value={module.name}>
-                          {module.code} - {module.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="professor">Professor</Label>
-                  <Input
-                    id="professor"
-                    value={newSectionSchedule.professor}
-                    onChange={(e) => setNewSectionSchedule(prev => ({ ...prev, professor: e.target.value }))}
-                    placeholder="Enter professor name"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="room">Room</Label>
-                  <Select
-                    value={newSectionSchedule.room}
-                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, room: value }))}
-                  >
-                    <SelectTrigger id="room">
-                      <SelectValue placeholder="Select room" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {classrooms.map(room => (
-                        <SelectItem key={room.id} value={room.number}>
-                          {room.number} - {room.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="type">Type</Label>
-                  <Select
-                    value={newSectionSchedule.type}
-                    onValueChange={(value) => setNewSectionSchedule(prev => ({ ...prev, type: value }))}
-                  >
-                    <SelectTrigger id="type">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {['COURSE', 'TD', 'TP'].map(type => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="groups">Groups</Label>
-                  <Input
-                    id="groups"
-                    value={newSectionSchedule.groups.join(', ')}
-                    onChange={(e) => setNewSectionSchedule(prev => ({ 
-                      ...prev, 
-                      groups: e.target.value.split(',').map(g => g.trim()) 
-                    }))}
-                    placeholder="Enter groups (comma-separated)"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => {
-                  isEditSectionScheduleDialogOpen ? setIsEditSectionScheduleDialogOpen(false) : setIsAddSectionScheduleDialogOpen(false);
-                }}>
-                  Cancel
-                </Button>
-                <Button 
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                  onClick={isEditSectionScheduleDialogOpen ? handleEditSectionSchedule : handleAddSectionSchedule}
-                >
-                  {isEditSectionScheduleDialogOpen ? 'Save Changes' : 'Add Schedule'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          {/* Delete Section Schedule Dialog */}
-          <Dialog open={isDeleteSectionScheduleDialogOpen} onOpenChange={setIsDeleteSectionScheduleDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Delete Section Schedule</DialogTitle>
-                <DialogDescription>
-                  Are you sure you want to delete this schedule entry? This action cannot be undone.
-                </DialogDescription>
-              </DialogHeader>
-              {selectedSchedule && (
-                <div className="py-4">
-                  <p className="text-sm text-gray-500">
-                    You are about to delete the schedule for Module: {selectedSchedule.module}, Day: {selectedSchedule.day}, Time: {selectedSchedule.timeSlot}.
-                  </p>
-                </div>
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsDeleteSectionScheduleDialogOpen(false)}>Cancel</Button>
-                <Button variant="destructive" onClick={handleDeleteSectionSchedule}>Delete</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </TabsContent>
       </Tabs>
     </div>
