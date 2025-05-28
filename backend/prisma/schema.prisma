@@ -119,7 +119,6 @@ model Module {
   id              Int            @id @default(autoincrement())
   code            String         
   name            String
-  description     String?
   academicYear    Int            // Added academic year support
   palier          Palier         @relation(fields: [palierId], references: [id])
   palierId        Int
@@ -160,10 +159,8 @@ model ScheduleSlot {
   moduleId        Int
   section         Section               @relation(fields: [sectionId], references: [id])
   sectionId       Int
-  room            Room?                 @relation(fields: [roomId], references: [id])
-  roomId          Int?
-  classroom       Classroom?            @relation(fields: [classroomId], references: [id])
-  classroomId     Int?
+  room            Room                  @relation(fields: [roomId], references: [id])
+  roomId          Int
   
   // Permutation System
   requestsA       PermutationRequest[]  @relation("SlotA")
@@ -172,7 +169,6 @@ model ScheduleSlot {
   @@unique([moduleId, sectionId, dayOfWeek, startTime])
   @@index([ownerId, moduleId])
   @@index([roomId])
-  @@index([classroomId])
 }
 
 enum DayOfWeek {
@@ -261,11 +257,11 @@ model Section {
   palierId      Int?
   year          Year?          @relation(fields: [yearId], references: [id])
   yearId        Int?
-  module        Module         @relation(fields: [moduleId], references: [id])
-  moduleId      Int
+  module        Module?        @relation(fields: [moduleId], references: [id])
+  moduleId      Int?
   slots         ScheduleSlot[]
 
-  @@unique([name, moduleId, academicYear])
+  @@unique([name, academicYear])
   @@index([moduleId])
   @@index([yearId])
   @@index([palierId])
@@ -335,8 +331,6 @@ model Room {
   name          String         @unique
   type          RoomType
   capacity      Int?
-  floor         Int?
-  building      String?
   isAvailable   Boolean        @default(true)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -346,20 +340,4 @@ model Room {
   surveillanceAssignments SurveillanceAssignment[]
 
   @@index([name, type])
-}
-
-model Classroom {
-  id            Int            @id @default(autoincrement())
-  name          String         @unique
-  capacity      Int?
-  floor         Int?
-  building      String?
-  isAvailable   Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  // Relations
-  schedules     ScheduleSlot[]
-
-  @@index([name])
 }

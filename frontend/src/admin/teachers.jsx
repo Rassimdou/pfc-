@@ -131,6 +131,7 @@ export default function TeachersManagement() {
         const response = await api.delete(`/admin/teachers/${id}?type=${type}`);
         if (response.data.success) {
           toast.success('Teacher deleted successfully');
+          setTeachers([]);
           fetchTeachers();
         } else {
           toast.error(response.data.message || 'Failed to delete teacher');
@@ -139,7 +140,8 @@ export default function TeachersManagement() {
         console.error('Error deleting teacher:', {
           message: error.message,
           response: error.response?.data,
-          status: error.response?.status
+          status: error.response?.status,
+          fullError: error
         });
         
         if (error.response?.status === 401) {

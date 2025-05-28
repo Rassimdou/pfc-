@@ -37,7 +37,7 @@ export default function AdminDashboard() {
       
       // Fetch teachers count
       const teachersResponse = await api.get('/admin/teachers')
-      const teachersCount = teachersResponse.data?.data?.length || 0
+      const activeTeachersCount = teachersResponse.data?.data?.filter(teacher => teacher.type === 'active').length || 0
 
       // Fetch modules count (sections)
       const modulesResponse = await api.get('/admin/modules')
@@ -61,7 +61,7 @@ export default function AdminDashboard() {
       }
 
       setStats({
-        teachers: teachersCount,
+        teachers: activeTeachersCount,
         sections: sectionsCount,
         classrooms: classroomsCount,
         swapRequests: swapStats

@@ -4,6 +4,7 @@ import session from 'express-session';
 import dotenv from 'dotenv';
 import authRoutes from './src/routes/authRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
+import userRoutes from './src/routes/userRoutes.js';
 import pool from './src/config/db.js'
 import { PrismaClient } from '@prisma/client';
 import cors from 'cors';
@@ -56,6 +57,7 @@ app.use(passport.session());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/user', userRoutes);
 app.use('/api/surveillance', surveillanceRoutes);
 app.use('/api/swap', swapRoutes);
 app.use('/api/notifications', notificationRoutes);

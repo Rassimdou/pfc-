@@ -58,6 +58,10 @@ export default function Planning() {
   // State for specialities
   const [specialities, setSpecialities] = useState([]);
   const [filteredSpecialities, setFilteredSpecialities] = useState([]);
+  // Add state for paliers
+  const [paliers, setPaliers] = useState([]);
+  // Add state for years
+  const [years, setYears] = useState([]);
   // State for sections
   const [sections, setSections] = useState([]);
   const [selectedSection, setSelectedSection] = useState(null);
@@ -78,9 +82,7 @@ export default function Planning() {
     name: '',
     number: '',
     type: 'SALLE_COURS',
-    capacity: '',
-    floor: '',
-    building: ''
+    capacity: ''
   });
 
   // State for dialog visibility
@@ -151,12 +153,11 @@ export default function Planning() {
   const [newModule, setNewModule] = useState({
     code: '',
     name: '',
-    description: '',
-    academicYear: 1,
+    academicYear: new Date().getFullYear(),
     semester: 'SEMESTRE1',
-    specialityId: null,
-    palierId: null,
-    yearId: null
+    specialityId: '',
+    palierId: '',
+    yearId: ''
   });
   const [isAddModuleDialogOpen, setIsAddModuleDialogOpen] = useState(false);
   const [isEditModuleDialogOpen, setIsEditModuleDialogOpen] = useState(false);
@@ -418,8 +419,7 @@ export default function Planning() {
 
       const response = await api.post('/admin/classrooms', {
         ...newClassroom,
-        capacity: parseInt(newClassroom.capacity) || null,
-        floor: parseInt(newClassroom.floor) || null
+        capacity: parseInt(newClassroom.capacity) || null
       });
 
       if (response.data.success) {
@@ -429,9 +429,7 @@ export default function Planning() {
           name: '',
           number: '',
           type: 'SALLE_COURS',
-          capacity: '',
-          floor: '',
-          building: ''
+          capacity: ''
         });
         setIsAddDialogOpen(false);
       } else {
@@ -520,15 +518,9 @@ export default function Planning() {
   // Module handlers
   const handleAddModule = async () => {
     try {
-      if (!newModule.code || !newModule.name || !newModule.specialityId) {
+      // Validate all required fields
+      if (!newModule.code || !newModule.name || !newModule.specialityId || !newModule.palierId || !newModule.yearId) {
         toast.error('Please fill in all required fields');
-        return;
-      }
-
-      // Get the selected speciality to find its palier and year
-      const selectedSpeciality = specialities.find(s => s.id === newModule.specialityId);
-      if (!selectedSpeciality) {
-        toast.error('Selected speciality not found');
         return;
       }
 
@@ -536,41 +528,32 @@ export default function Planning() {
       const moduleData = {
         code: newModule.code,
         name: newModule.name,
-        description: newModule.description || '',
         academicYear: parseInt(newModule.academicYear),
         semestre: newModule.semester,
         specialityId: parseInt(newModule.specialityId),
-        palierId: selectedSpeciality.palierId,
-        yearId: selectedSpeciality.yearId
+        palierId: parseInt(newModule.palierId),
+        yearId: parseInt(newModule.yearId)
       };
 
       console.log('Sending module data:', moduleData);
 
-      const response = await api.post('/admin/modules', moduleData, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.post('/admin/modules', moduleData);
 
       if (response.data.success) {
         toast.success('Module added successfully');
         // Add the new module to the list
         setModules(prev => [...prev, response.data.data]);
         // Reset the form
-        setNewModule({
+    setNewModule({
           code: '',
           name: '',
-          description: '',
-          academicYear: 1,
+          academicYear: new Date().getFullYear(),
           semester: 'SEMESTRE1',
-          specialityId: null,
-          palierId: null,
-          yearId: null
-        });
-        setIsAddModuleDialogOpen(false);
-      } else {
-        toast.error(response.data.message || 'Failed to add module');
+          specialityId: '',
+          palierId: '',
+          yearId: ''
+    });
+    setIsAddModuleDialogOpen(false);
       }
     } catch (error) {
       console.error('Error adding module:', error);
@@ -828,19 +811,19 @@ export default function Planning() {
         setActiveTab('section-schedules');
         
         // Refresh the schedules list
-        const updatedResponse = await api.get('/admin/schedules/section', {
-          params: {
-            section: formData.section,
-            speciality: formData.speciality,
+          const updatedResponse = await api.get('/admin/schedules/section', {
+            params: {
+              section: formData.section,
+              speciality: formData.speciality,
             year: parseInt(formData.year),
-            semester: formData.semester
-          },
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        
-        if (updatedResponse.data.success) {
+              semester: formData.semester
+            },
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (updatedResponse.data.success) {
           setSectionSchedules(updatedResponse.data.scheduleSlots);
         }
       } else {
@@ -1269,32 +1252,51 @@ export default function Planning() {
 
   const handleAddSection = async () => {
     try {
-      if (!newSection.name || !newSection.specialityId || !newSection.academicYear) {
-        toast.error('Please fill in all required fields');
+      if (!newSection.name || !newSection.speciality || !newSection.academicYear) {
+        toast({
+          title: "Error",
+          description: "Please fill in all required fields",
+          variant: "destructive"
+        });
         return;
       }
 
-      const response = await api.post('/admin/sections', {
-        name: newSection.name,
-        specialityId: parseInt(newSection.specialityId),
-        academicYear: parseInt(newSection.academicYear)
+      const response = await fetch('/api/admin/sections', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: newSection.name,
+          academicYear: parseInt(newSection.academicYear),
+          specialityId: parseInt(newSection.speciality)
+        }),
       });
-      
-      if (response.data.success) {
-        toast.success('Section added successfully');
-        setSections(prev => [...prev, response.data.data]);
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Section added successfully"
+        });
+        setSections(prev => [...prev, data.section]);
         setIsAddSectionDialogOpen(false);
-        setNewSection({ 
-          name: '', 
-          specialityId: null,
-          academicYear: 1
+        setNewSection({
+          name: '',
+          speciality: '',
+          academicYear: ''
         });
       } else {
-        toast.error(response.data.message || 'Failed to add section');
+        throw new Error(data.message);
       }
     } catch (error) {
       console.error('Error adding section:', error);
-      toast.error(error.response?.data?.message || 'Failed to add section');
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add section",
+        variant: "destructive"
+      });
     }
   };
 
@@ -1365,6 +1367,59 @@ export default function Planning() {
     fetchSections();
   }, []);
 
+  // Add useEffect to fetch paliers and years
+  useEffect(() => {
+    const fetchPaliersAndYears = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.error('No authentication token found');
+          return;
+        }
+
+        // Fetch paliers
+        const paliersResponse = await api.get('/admin/paliers', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (paliersResponse.data.success) {
+          setPaliers(paliersResponse.data.paliers);
+        } else {
+          console.error('Failed to fetch paliers:', paliersResponse.data.message);
+          toast.error(paliersResponse.data.message || 'Failed to load paliers');
+        }
+
+        // Fetch years
+        const yearsResponse = await api.get('/admin/years', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (yearsResponse.data.success) {
+          setYears(yearsResponse.data.years);
+        } else {
+          console.error('Failed to fetch years:', yearsResponse.data.message);
+          toast.error(yearsResponse.data.message || 'Failed to load years');
+        }
+      } catch (error) {
+        console.error('Error fetching paliers and years:', error);
+        if (error.response?.status === 401) {
+          toast.error('Your session has expired. Please log in again.');
+          window.location.href = '/login';
+        } else {
+          toast.error('Failed to load paliers and years. Please try again later.');
+        }
+      }
+    };
+
+    fetchPaliersAndYears();
+  }, []);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1433,7 +1488,7 @@ export default function Planning() {
                     )}
                   </div>
                   <div>
-                    <Label htmlFor="speciality">Specialité</Label>
+                    <Label htmlFor="speciality">Speciality</Label>
                     <Select
                       value={formData.speciality}
                       onValueChange={(value) => handleFormChange('speciality', value)}
@@ -1442,8 +1497,8 @@ export default function Planning() {
                         <SelectValue placeholder="Select speciality" />
                       </SelectTrigger>
                       <SelectContent>
-                        {filteredSpecialities.map((speciality) => (
-                          <SelectItem key={speciality.id} value={speciality.name}>
+                        {filteredSpecialities.map(speciality => (
+                          <SelectItem key={speciality.id} value={speciality.id.toString()}>
                             {speciality.name}
                           </SelectItem>
                         ))}
@@ -1463,11 +1518,16 @@ export default function Planning() {
                         <SelectValue placeholder="Select section" />
                       </SelectTrigger>
                       <SelectContent>
-                        {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((section) => (
-                          <SelectItem key={section} value={section}>
-                            Section {section}
-                          </SelectItem>
-                        ))}
+                        {sections
+                          .filter(section => 
+                            section.specialityId === parseInt(formData.speciality) && 
+                            section.academicYear === parseInt(formData.year)
+                          )
+                          .map((section) => (
+                            <SelectItem key={section.id} value={section.name}>
+                              Section {section.name}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                     {formErrors.section && (
@@ -1598,7 +1658,7 @@ export default function Planning() {
                           Add Classroom
                         </Button>
                       </DialogTrigger>
-                      <DialogContent>
+                      <DialogContent className="bg-white">
                         <DialogHeader>
                           <DialogTitle>Add New Classroom</DialogTitle>
                           <DialogDescription>
@@ -1651,27 +1711,6 @@ export default function Planning() {
                               onChange={(e) => setNewClassroom(prev => ({ ...prev, capacity: e.target.value }))}
                               className="col-span-3"
                               placeholder="Enter room capacity"
-                            />
-                          </div>
-                          <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="floor" className="text-right">Floor</Label>
-                            <Input
-                              id="floor"
-                              type="number"
-                              value={newClassroom.floor}
-                              onChange={(e) => setNewClassroom(prev => ({ ...prev, floor: e.target.value }))}
-                              className="col-span-3"
-                              placeholder="Enter floor number"
-                            />
-                          </div>
-                          <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="building" className="text-right">Building</Label>
-                            <Input
-                              id="building"
-                              value={newClassroom.building}
-                              onChange={(e) => setNewClassroom(prev => ({ ...prev, building: e.target.value }))}
-                              className="col-span-3"
-                              placeholder="Enter building name"
                             />
                           </div>
                         </div>
@@ -2122,7 +2161,7 @@ export default function Planning() {
                           Add New Module
                         </Button>
                       </DialogTrigger>
-                      <DialogContent>
+                      <DialogContent className="bg-white">
                         <DialogHeader>
                           <DialogTitle>Add New Module</DialogTitle>
                           <DialogDescription>
@@ -2153,20 +2192,10 @@ export default function Planning() {
                             />
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="description" className="text-right">Description</Label>
-                            <Input
-                              id="description"
-                              value={newModule.description}
-                              onChange={(e) => setNewModule(prev => ({ ...prev, description: e.target.value }))}
-                              className="col-span-3"
-                              placeholder="Enter module description"
-                            />
-                          </div>
-                          <div className="grid grid-cols-4 items-center gap-4">
                             <Label htmlFor="speciality" className="text-right">Speciality *</Label>
                             <Select
-                              value={newModule.specialityId?.toString()}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, specialityId: parseInt(value) }))}
+                              value={newModule.specialityId}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, specialityId: value }))}
                               required
                             >
                               <SelectTrigger className="col-span-3">
@@ -2182,26 +2211,45 @@ export default function Planning() {
                             </Select>
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="academicYear" className="text-right">Academic Year *</Label>
+                            <Label htmlFor="palier" className="text-right">Palier *</Label>
                             <Select
-                              value={newModule.academicYear.toString()}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, academicYear: parseInt(value) }))}
+                              value={newModule.palierId}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, palierId: value }))}
+                              required
+                            >
+                              <SelectTrigger className="col-span-3">
+                                <SelectValue placeholder="Select palier" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {paliers.map(palier => (
+                                  <SelectItem key={palier.id} value={palier.id.toString()}>
+                                    {palier.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="year" className="text-right">Year *</Label>
+                            <Select
+                              value={newModule.yearId}
+                              onValueChange={(value) => setNewModule(prev => ({ ...prev, yearId: value }))}
                               required
                             >
                               <SelectTrigger className="col-span-3">
                                 <SelectValue placeholder="Select year" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="1">First Year</SelectItem>
-                                <SelectItem value="2">Second Year</SelectItem>
-                                <SelectItem value="3">Third Year</SelectItem>
-                                <SelectItem value="4">Fourth Year</SelectItem>
-                                <SelectItem value="5">Fifth Year</SelectItem>
+                                {years.map(year => (
+                                  <SelectItem key={year.id} value={year.id.toString()}>
+                                    {year.name}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="semestre" className="text-right">Semester *</Label>
+                            <Label htmlFor="semester" className="text-right">Semester *</Label>
                             <Select
                               value={newModule.semester}
                               onValueChange={(value) => setNewModule(prev => ({ ...prev, semester: value }))}
@@ -2213,42 +2261,6 @@ export default function Planning() {
                               <SelectContent>
                                 <SelectItem value="SEMESTRE1">Semester 1</SelectItem>
                                 <SelectItem value="SEMESTRE2">Semester 2</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="palier" className="text-right">Palier *</Label>
-                            <Select
-                              value={newModule.palierId?.toString()}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, palierId: parseInt(value) }))}
-                              required
-                            >
-                              <SelectTrigger className="col-span-3">
-                                <SelectValue placeholder="Select palier" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="1">LMD</SelectItem>
-                                <SelectItem value="2">ING</SelectItem>
-                                <SelectItem value="3">SIGL</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="year" className="text-right">Year *</Label>
-                            <Select
-                              value={newModule.yearId?.toString()}
-                              onValueChange={(value) => setNewModule(prev => ({ ...prev, yearId: parseInt(value) }))}
-                              required
-                            >
-                              <SelectTrigger className="col-span-3">
-                                <SelectValue placeholder="Select year" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="1">L1</SelectItem>
-                                <SelectItem value="2">L2</SelectItem>
-                                <SelectItem value="3">L3</SelectItem>
-                                <SelectItem value="4">M1</SelectItem>
-                                <SelectItem value="5">M2</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -2459,44 +2471,44 @@ export default function Planning() {
                           <th className="px-4 py-3 text-left font-medium text-gray-500">Name</th>
                           <th className="px-4 py-3 text-left font-medium text-gray-500">Speciality</th>
                           <th className="px-4 py-3 text-left font-medium text-gray-500">Academic Year</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                         {sections.map((section) => (
                           <tr key={section.id} className="border-b hover:bg-gray-50">
                             <td className="px-4 py-3">Section {section.name}</td>
-                            <td className="px-4 py-3">
+                        <td className="px-4 py-3">
                               {specialities.find(s => s.id === section.specialityId)?.name || 'N/A'}
-                            </td>
+                        </td>
                             <td className="px-4 py-3">Year {section.academicYear}</td>
-                            <td className="px-4 py-3">
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="ghost"
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <Button
+                              variant="ghost"
                                   size="icon"
                                   onClick={() => handleEditSectionClick(section)}
-                                >
+                            >
                                   <Edit2 className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
+                            </Button>
+                            <Button
+                              variant="ghost"
                                   size="icon"
                                   onClick={() => handleDeleteSectionClick(section)}
-                                >
+                            >
                                   <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
 
                   {/* Add/Edit Section Dialog */}
                   <Dialog open={isAddSectionDialogOpen || isEditSectionDialogOpen} onOpenChange={isEditSectionDialogOpen ? setIsEditSectionDialogOpen : setIsAddSectionDialogOpen}>
-            <DialogContent>
+            <DialogContent className="bg-white">
               <DialogHeader>
                         <DialogTitle>{isEditSectionDialogOpen ? 'Edit Section' : 'Add Section'}</DialogTitle>
                 <DialogDescription>
@@ -2523,11 +2535,32 @@ export default function Planning() {
                       <SelectValue placeholder="Select speciality" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredSpecialities.map(speciality => (
-                                <SelectItem key={speciality.id} value={speciality.id.toString()}>
-                          {speciality.name}
-                        </SelectItem>
-                      ))}
+                      {specialities
+                        .filter(speciality => {
+                          const name = speciality.name.toUpperCase().replace(/ /g, '');
+                          let targetCodes = [];
+                          
+                          // Years 1-3: Match L1/L2/L3, Licence1/Licence2/Licence3, or ING1/ING2/ING3
+                          if (newSection.academicYear >= 1 && newSection.academicYear <= 3) {
+                            targetCodes.push(
+                              `L${newSection.academicYear}`,
+                              `LICENCE${newSection.academicYear}`,
+                              `ING${newSection.academicYear}`
+                            );
+                          } 
+                          // Years 4-5: Match M1/M2
+                          else if (newSection.academicYear === 4 || newSection.academicYear === 5) {
+                            const masterYear = newSection.academicYear - 3; // 4 → M1, 5 → M2
+                            targetCodes.push(`M${masterYear}`);
+                          }
+                          
+                          return targetCodes.some(code => name.includes(code));
+                        })
+                        .map(speciality => (
+                          <SelectItem key={speciality.id} value={speciality.id.toString()}>
+                            {speciality.name}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2546,29 +2579,6 @@ export default function Planning() {
                               <SelectItem value="3">Third Year</SelectItem>
                               <SelectItem value="4">Fourth Year</SelectItem>
                               <SelectItem value="5">Fifth Year</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                          <Label htmlFor="section-module">Module</Label>
-                  <Select
-                            value={newSection.moduleId}
-                            onValueChange={(value) => setNewSection(prev => ({ ...prev, moduleId: parseInt(value) }))}
-                  >
-                            <SelectTrigger id="section-module">
-                      <SelectValue placeholder="Select module" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modules
-                        .filter(module => 
-                          module.specialityId === newSection.specialityId && 
-                          module.academicYear === newSection.academicYear
-                        )
-                        .map(module => (
-                          <SelectItem key={module.id} value={module.id.toString()}>
-                            {module.code} - {module.name}
-                          </SelectItem>
-                        ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2591,7 +2601,7 @@ export default function Planning() {
 
                   {/* Delete Section Dialog */}
                   <Dialog open={isDeleteSectionDialogOpen} onOpenChange={setIsDeleteSectionDialogOpen}>
-            <DialogContent>
+            <DialogContent className="bg-white">
               <DialogHeader>
                         <DialogTitle>Delete Section</DialogTitle>
                 <DialogDescription>

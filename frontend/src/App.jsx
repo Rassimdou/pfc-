@@ -16,6 +16,7 @@ import Surveillance from './user/Surveillance';
 import SurveillanceManagement from './admin/surveillance';
 import ExchangeHistory from './admin/exchanges';
 import UserProfile from './user/profile';
+import SwapRequests from './user/SwapRequests';
 import { Toaster } from 'react-hot-toast';
 
 
@@ -41,6 +42,7 @@ function App() {
           <Route path="page" element={<Dashboard />} />
           <Route path="surveillance" element={<Surveillance />} />
           <Route path="profile" element={<UserProfile />} />
+          <Route path="swap-requests" element={<SwapRequests />} />
         </Route>
         
         {/* Admin routes */}

@@ -367,13 +367,18 @@ export const deleteTeacher = async (req, res) => {
       success: true,
       message: 'Teacher deleted successfully'
     });
+    // Add cache-busting header to force UI refresh
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   } catch (error) {
     console.error('Detailed error in deleteTeacher:', {
       name: error.name,
       message: error.message,
       code: error.code,
       meta: error.meta,
-      stack: error.stack
+      stack: error.stack,
+      fullError: error
     });
     
     // Handle specific Prisma errors

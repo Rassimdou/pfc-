@@ -20,9 +20,6 @@ DROP INDEX `Room_number_key` ON `room`;
 DROP INDEX `Room_type_building_idx` ON `room`;
 
 -- DropIndex
-DROP INDEX `Section_moduleId_academicYear_idx` ON `section`;
-
--- DropIndex
 DROP INDEX `SurveillanceAssignment_date_userId_idx` ON `surveillanceassignment`;
 
 -- DropIndex
@@ -43,8 +40,6 @@ CREATE TABLE `Classroom` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(191) NOT NULL,
     `capacity` INTEGER NULL,
-    `floor` INTEGER NULL,
-    `building` VARCHAR(191) NULL,
     `isAvailable` BOOLEAN NOT NULL DEFAULT true,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,

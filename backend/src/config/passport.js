@@ -4,32 +4,48 @@ import prisma from '../lib/prismaClient.js';
 import jwt from 'jsonwebtoken';
 import { generateTokens } from '../controllers/authController.js';
 
+// Debug logging
+console.log('Environment variables:');
+console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID);
+console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET);
+console.log('FRONTEND_URL:', process.env.FRONTEND_URL);
+
+// Ensure consistent port usage
+const API_URL = 'http://localhost:5000';
+const callbackURL = `${API_URL}/api/auth/google/callback`;
+console.log('API URL:', API_URL);
+console.log('Callback URL:', callbackURL);
+
+// Log the full OAuth configuration
+const oauthConfig = {
+  clientID: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL,
+  scope: ['profile', 'email']
+};
+console.log('OAuth Configuration:', {
+  ...oauthConfig,
+  clientSecret: oauthConfig.clientSecret ? 'Set' : 'Not set'
+});
+
 passport.use(
   new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${process.env.API_URL}/api/auth/google/callback`,
-      passReqToCallback: true
-    },
+    oauthConfig,
     async (req, accessToken, refreshToken, profile, done) => {
       try {
-        console.log('Google profile:', profile);
+        console.log('Google OAuth callback received:', {
+          accessToken: accessToken ? 'Present' : 'Missing',
+          refreshToken: refreshToken ? 'Present' : 'Missing',
+          profileId: profile.id,
+          email: profile.emails?.[0]?.value,
+          callbackURL
+        });
+        
         const email = profile.emails?.[0]?.value?.toLowerCase();
         
         if (!email) {
           console.log('No email provided by Google');
           return done(null, false, { message: 'No email provided by Google' });
-        }
-
-        // Check if email is authorized
-        const pendingTeacher = await prisma.pendingTeacher.findUnique({
-          where: { email }
-        });
-
-        if (!pendingTeacher) {
-          console.log('Email not authorized:', email);
-          return done(null, false, { message: 'Email not authorized for registration' });
         }
 
         // Check if user already exists
@@ -41,7 +57,8 @@ passport.use(
             firstName: true,
             lastName: true,
             role: true,
-            isVerified: true
+            isVerified: true,
+            phoneNumber: true
           }
         });
 
@@ -65,7 +82,8 @@ passport.use(
               firstName: true,
               lastName: true,
               role: true,
-              isVerified: true
+              isVerified: true,
+              phoneNumber: true
             }
           });
         }

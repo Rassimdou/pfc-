@@ -37,7 +37,7 @@ export default function UserProfile() {
         return;
       }
 
-      const response = await api.get('/users/profile', {
+      const response = await api.get('/user/profile', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -78,7 +78,7 @@ export default function UserProfile() {
         return;
       }
 
-      const response = await api.put('/users/profile', profileData, {
+      const response = await api.put('/user/profile', profileData, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -115,7 +115,7 @@ export default function UserProfile() {
         return;
       }
 
-      const response = await api.post('/users/change-password', securityData, {
+      const response = await api.post('/user/change-password', securityData, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

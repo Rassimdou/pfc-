@@ -107,32 +107,33 @@ router.get('/classrooms', authenticate, async (req, res) => {
 // Create a new classroom
 router.post('/classrooms', authenticate, async (req, res) => {
   try {
-    const { name, type, capacity, floor, building } = req.body;
+    const { name, type, capacity } = req.body;
 
-    // Generate a room number if not provided
-    const roomNumber = name || `ROOM-${Date.now()}`;
+    if (!name || !type) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name and type are required'
+      });
+    }
 
-    const classroom = await prisma.room.create({
+    const room = await prisma.room.create({
       data: {
         name,
-        number: roomNumber,
         type,
         capacity: capacity ? parseInt(capacity) : null,
-        floor: floor ? parseInt(floor) : null,
-        building,
         isAvailable: true
       }
     });
 
     res.json({
       success: true,
-      data: classroom
+      data: room
     });
   } catch (error) {
-    console.error('Error creating classroom:', error);
+    console.error('Error creating room:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create classroom'
+      message: 'Failed to create room'
     });
   }
 });
@@ -141,29 +142,34 @@ router.post('/classrooms', authenticate, async (req, res) => {
 router.put('/classrooms/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, type, capacity, floor, building, isAvailable } = req.body;
+    const { name, type, capacity, isAvailable } = req.body;
 
-    const classroom = await prisma.room.update({
+    if (!name || !type) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name and type are required'
+      });
+    }
+
+    const room = await prisma.room.update({
       where: { id: parseInt(id) },
       data: {
         name,
         type,
         capacity: capacity ? parseInt(capacity) : null,
-        floor: floor ? parseInt(floor) : null,
-        building,
         isAvailable
       }
     });
 
     res.json({
       success: true,
-      data: classroom
+      data: room
     });
   } catch (error) {
-    console.error('Error updating classroom:', error);
+    console.error('Error updating room:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update classroom'
+      message: 'Failed to update room'
     });
   }
 });
@@ -173,7 +179,7 @@ router.delete('/classrooms/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if classroom is being used in any schedules
+    // Check if room is being used in any schedules
     const schedules = await prisma.scheduleSlot.findMany({
       where: { roomId: parseInt(id) }
     });
@@ -181,7 +187,7 @@ router.delete('/classrooms/:id', authenticate, async (req, res) => {
     if (schedules.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete classroom as it is being used in schedules'
+        message: 'Cannot delete room as it is being used in schedules'
       });
     }
 
@@ -191,13 +197,13 @@ router.delete('/classrooms/:id', authenticate, async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Classroom deleted successfully'
+      message: 'Room deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting classroom:', error);
+    console.error('Error deleting room:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete classroom'
+      message: 'Failed to delete room'
     });
   }
 });
@@ -636,20 +642,194 @@ router.get('/exchanges', authenticate, async (req, res) => {
   }
 });
 
-// Get all modules
-router.get('/modules', async (req, res) => {
+// Get all modules with filtered data
+router.get('/modules', authenticate, async (req, res) => {
   try {
+    const { yearId } = req.query;
+    
+    const whereClause = yearId ? { yearId: parseInt(yearId) } : {};
+    
     const modules = await prisma.module.findMany({
+      where: whereClause,
       include: {
-        speciality: true,
-        year: true,
-        palier: true
+        speciality: {
+          select: {
+            name: true
+          }
+        },
+        year: {
+          select: {
+            name: true
+          }
+        },
+        palier: {
+          select: {
+            name: true
+          }
+        }
+      },
+      orderBy: {
+        code: 'asc'
       }
     });
-    res.json({ success: true, data: modules });
+
+    // Transform the response to show names instead of IDs
+    const formattedModules = modules.map(module => ({
+      id: module.id,
+      code: module.code,
+      name: module.name,
+      academicYear: module.academicYear,
+      speciality: module.speciality.name,
+      year: module.year.name,
+      palier: module.palier.name,
+      semestre: module.semestre
+    }));
+
+    res.json({
+      success: true,
+      data: formattedModules
+    });
   } catch (error) {
     console.error('Error fetching modules:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch modules' });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch modules'
+    });
+  }
+});
+
+// Get specialities by year
+router.get('/specialities/by-year/:yearId', authenticate, async (req, res) => {
+  try {
+    const { yearId } = req.params;
+
+    const specialities = await prisma.speciality.findMany({
+      where: {
+        yearId: parseInt(yearId)
+      },
+      select: {
+        id: true,
+        name: true
+      },
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    res.json({
+      success: true,
+      specialities
+    });
+  } catch (error) {
+    console.error('Error fetching specialities by year:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch specialities'
+    });
+  }
+});
+
+// Create new module with simplified data
+router.post('/modules', authenticate, async (req, res) => {
+  try {
+    const { 
+      code, 
+      name, 
+      academicYear, 
+      yearId, 
+      specialityId, 
+      semestre 
+    } = req.body;
+
+    // Validate required fields
+    if (!code || !name || !academicYear || !yearId || !specialityId || !semestre) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Get the year to find its palier
+    const year = await prisma.year.findUnique({
+      where: { id: parseInt(yearId) },
+      include: { palier: true }
+    });
+
+    if (!year) {
+      return res.status(404).json({
+        success: false,
+        message: 'Year not found'
+      });
+    }
+
+    // Check if module code already exists for this academic year
+    const existingModule = await prisma.module.findFirst({
+      where: { 
+        code,
+        academicYear: parseInt(academicYear)
+      }
+    });
+
+    if (existingModule) {
+      return res.status(400).json({
+        success: false,
+        message: 'Module code already exists for this academic year'
+      });
+    }
+
+    // Create the module
+    const module = await prisma.module.create({
+      data: {
+        code,
+        name,
+        academicYear: parseInt(academicYear),
+        palierId: year.palier.id,
+        yearId: parseInt(yearId),
+        specialityId: parseInt(specialityId),
+        semestre: semestre
+      },
+      include: {
+        speciality: {
+          select: {
+            name: true
+          }
+        },
+        year: {
+          select: {
+            name: true
+          }
+        },
+        palier: {
+          select: {
+            name: true
+          }
+        }
+      }
+    });
+
+    // Format the response
+    const formattedModule = {
+      id: module.id,
+      code: module.code,
+      name: module.name,
+      academicYear: module.academicYear,
+      speciality: module.speciality.name,
+      year: module.year.name,
+      palier: module.palier.name,
+      semestre: module.semestre
+    };
+
+    res.json({ 
+      success: true, 
+      data: formattedModule 
+    });
+  } catch (error) {
+    console.error('Error creating module:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to create module',
+      error: error.message 
+    });
   }
 });
 
@@ -1072,7 +1252,7 @@ router.get('/sections', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error fetching sections:', error);
     res.status(500).json({
-      success: false,
+        success: false,
       message: 'Failed to fetch sections: ' + error.message
     });
   }
@@ -1082,17 +1262,17 @@ router.post('/sections', authenticate, async (req, res) => {
   try {
     const { name, moduleId, academicYear } = req.body;
 
-    if (!name || !moduleId || !academicYear) {
+    if (!name || !academicYear) {
       return res.status(400).json({
         success: false,
-        message: 'Name, module ID, and academic year are required'
+        message: 'Name and academic year are required'
       });
     }
 
     const section = await prisma.section.create({
       data: {
         name,
-        moduleId: parseInt(moduleId),
+        moduleId: moduleId ? parseInt(moduleId) : null,
         academicYear: parseInt(academicYear)
       },
       include: {
@@ -1343,8 +1523,6 @@ router.post('/schedules/section', authenticate, async (req, res) => {
       }
     });
 
-    console.log('Found or created palier:', palierRecord);
-
     // Then find or create the year using the palier ID
     const yearRecord = await prisma.year.upsert({
       where: {
@@ -1359,8 +1537,6 @@ router.post('/schedules/section', authenticate, async (req, res) => {
         palierId: palierRecord.id
       }
     });
-
-    console.log('Found or created year:', yearRecord);
 
     // Then find or create speciality using the year ID
     const specialityRecord = await prisma.speciality.upsert({
@@ -1379,40 +1555,51 @@ router.post('/schedules/section', authenticate, async (req, res) => {
       }
     });
 
-    console.log('Found or created speciality:', specialityRecord);
-
-     const module = await prisma.module.upsert({
-        where: { code: moduleName, academicYear: parseInt(academicYear) },
-        update: {},
-        create: {
-            code: moduleName,
-            name: moduleName,
-            academicYear: parseInt(academicYear),
-            palierId: specialityRecord.palierId,
-            yearId: yearRecord.id,
-            semestre: semester.toUpperCase(),
-            specialityId: specialityRecord.id,
+    // Find or create the module
+    const module = await prisma.module.upsert({
+      where: {
+        code_academicYear: {
+          code: moduleName,
+          academicYear: parseInt(academicYear)
         }
+      },
+      update: {
+        name: moduleName,
+        specialityId: specialityRecord.id,
+        yearId: yearRecord.id,
+        palierId: palierRecord.id,
+        semestre: semester.toUpperCase()
+      },
+      create: {
+        code: moduleName,
+        name: moduleName,
+        academicYear: parseInt(academicYear),
+        specialityId: specialityRecord.id,
+        yearId: yearRecord.id,
+        palierId: palierRecord.id,
+        semestre: semester.toUpperCase()
+      }
     });
 
+    // Find or create the section
     const section = await prisma.section.upsert({
       where: {
-        name_moduleId_academicYear: {
+        name_academicYear: {
           name: sectionName,
-          moduleId: module.id,
           academicYear: parseInt(academicYear)
         }
       },
       update: {
         yearId: yearRecord.id,
-        moduleId: module.id
+        moduleId: module.id,
+        palierId: palierRecord.id
       },
       create: {
         name: sectionName,
         moduleId: module.id,
         academicYear: parseInt(academicYear),
         yearId: yearRecord.id,
-        specialityId: specialityRecord.id
+        palierId: palierRecord.id
       }
     });
 
@@ -1743,167 +1930,56 @@ router.post('/schedules/section/bulk', authenticate, async (req, res) => {
   }
 });
 
-// Module Management Routes
-router.post('/modules', async (req, res) => {
-  try {
-    const { code, name, description, academicYear, palierId, yearId, specialityId, semestre } = req.body;
-
-    // Validate required fields
-    if (!code || !name || !specialityId || !yearId || !palierId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields'
-      });
-    }
-
-    // Check if module code already exists
-    const existingModule = await prisma.module.findFirst({
-      where: { code }
-    });
-
-    if (existingModule) {
-      return res.status(400).json({
-        success: false,
-        message: 'Module code already exists'
-      });
-    }
-
-    const module = await prisma.module.create({
-      data: {
-        code,
-        name,
-        description,
-        academicYear: academicYear || new Date().getFullYear(),
-        palierId: parseInt(palierId),
-        yearId: parseInt(yearId),
-        specialityId: parseInt(specialityId),
-        semestre: semestre || 'SEMESTRE1'
-      },
-      include: {
-        speciality: true,
-        year: true,
-        palier: true
-      }
-    });
-
-    res.json({ success: true, data: module });
-  } catch (error) {
-    console.error('Error creating module:', error);
-    res.status(500).json({ success: false, message: 'Failed to create module' });
-  }
-});
-
-router.put('/modules/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { code, name, description, academicYear, palierId, yearId, specialityId, semestre } = req.body;
-
-    // Validate required fields
-    if (!code || !name || !specialityId || !yearId || !palierId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields'
-      });
-    }
-
-    // Check if module exists
-    const existingModule = await prisma.module.findUnique({
-      where: { id: parseInt(id) }
-    });
-
-    if (!existingModule) {
-      return res.status(404).json({
-        success: false,
-        message: 'Module not found'
-      });
-    }
-
-    // Check if new code conflicts with existing modules
-    if (code !== existingModule.code) {
-      const codeExists = await prisma.module.findFirst({
-        where: {
-          code,
-          id: { not: parseInt(id) }
-        }
-      });
-
-      if (codeExists) {
-        return res.status(400).json({
-          success: false,
-          message: 'Module code already exists'
-        });
-      }
-    }
-
-    const updatedModule = await prisma.module.update({
-      where: { id: parseInt(id) },
-      data: {
-        code,
-        name,
-        description,
-        academicYear: academicYear || existingModule.academicYear,
-        palierId: parseInt(palierId),
-        yearId: parseInt(yearId),
-        specialityId: parseInt(specialityId),
-        semestre: semestre || existingModule.semestre
-      },
-      include: {
-        speciality: true,
-        year: true,
-        palier: true
-      }
-    });
-
-    res.json({ success: true, data: updatedModule });
-  } catch (error) {
-    console.error('Error updating module:', error);
-    res.status(500).json({ success: false, message: 'Failed to update module' });
-  }
-});
-
-router.delete('/modules/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Check if module exists
-    const module = await prisma.module.findUnique({
-      where: { id: parseInt(id) }
-    });
-
-    if (!module) {
-      return res.status(404).json({
-        success: false,
-        message: 'Module not found'
-      });
-    }
-
-    // Check if module is being used in any schedules
-    const scheduleSlots = await prisma.scheduleSlot.findFirst({
-      where: { moduleId: parseInt(id) }
-    });
-
-    if (scheduleSlots) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete module as it is being used in schedules'
-      });
-    }
-
-    await prisma.module.delete({
-      where: { id: parseInt(id) }
-    });
-
-    res.json({ success: true, message: 'Module deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting module:', error);
-    res.status(500).json({ success: false, message: 'Failed to delete module' });
-  }
-});
-
 // Admin Profile Routes
 router.get('/profile', authenticate, getAdminProfile);
 router.put('/profile', authenticate, updateAdminProfile);
 router.post('/change-password', authenticate, changeAdminPassword);
+
+// Get all paliers
+router.get('/paliers', authenticate, async (req, res) => {
+  try {
+    const paliers = await prisma.palier.findMany({
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    res.json({
+      success: true,
+      paliers
+    });
+  } catch (error) {
+    console.error('Error fetching paliers:', error);
+    res.status(500).json({
+        success: false,
+      message: 'Failed to fetch paliers'
+    });
+  }
+});
+
+// Get all years
+router.get('/years', authenticate, async (req, res) => {
+  try {
+    const years = [
+      { id: 1, name: 'First Year' },
+      { id: 2, name: 'Second Year' },
+      { id: 3, name: 'Third Year' },
+      { id: 4, name: 'Fourth Year' },
+      { id: 5, name: 'Fifth Year' }
+    ];
+
+    res.json({
+      success: true,
+      years
+    });
+  } catch (error) {
+    console.error('Error fetching years:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch years'
+    });
+  }
+});
 
 export default router;
 

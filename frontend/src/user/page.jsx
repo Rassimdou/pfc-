@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs"
-import { Calendar, Clock, Users, Bell, Settings, BookOpen, ArrowLeftRight, CheckCircle, XCircle, User, LogOut } from "lucide-react"
+import { Calendar, Clock, Users, Bell, Settings, BookOpen, ArrowLeftRight, CheckCircle, XCircle, User, LogOut, BarChart2, TrendingUp, CalendarDays, AlertCircle, Lock } from "lucide-react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from '@/utils/axios';
 import { toast } from 'react-hot-toast';
@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/ui/dropdown-menu"
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -21,6 +22,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState([]);
   const [pendingSwaps, setPendingSwaps] = useState([]);
+  const [stats, setStats] = useState({
+    totalAssignments: 0,
+    upcomingAssignments: 0,
+    completedAssignments: 0,
+    pendingSwaps: 0
+  });
 
   useEffect(() => {
     // Check for token and user data in URL params (for Google auth)
@@ -51,12 +58,14 @@ export default function Dashboard() {
       setUser(storedUser);
     }
 
-    // Fetch notifications and pending swaps
+    // Fetch all data
     const fetchData = async () => {
       try {
-        const [notificationsRes, swapsRes] = await Promise.all([
+        setLoading(true);
+        const [notificationsRes, swapsRes, assignmentsRes] = await Promise.all([
           api.get('/notifications'),
-          api.get('/surveillance/swap-requests/pending')
+          api.get('/surveillance/swap-requests/pending'),
+          api.get('/surveillance/assignments')
         ]);
         
         // Process notifications
@@ -64,8 +73,6 @@ export default function Dashboard() {
           ...notification,
           isSender: notification.type === 'SWAP_REQUEST' && notification.details?.fromUserId === user?.id
         })).filter(notification => {
-          // Keep all notifications except swap requests where user is sender
-          // But allow swap acceptance notifications for the sender
           if (notification.type === 'SWAP_REQUEST') {
             return !notification.isSender || notification.status === 'ACCEPTED';
           }
@@ -78,13 +85,32 @@ export default function Dashboard() {
           isSender: swap.userId === user?.id,
           senderName: swap.fromAssignment?.user?.name || 'Unknown',
           receiverName: swap.toAssignment?.user?.name || 'Unknown'
-        })).filter(swap => !swap.isSender); // Filter out swaps where user is sender
+        })).filter(swap => !swap.isSender);
+
+        // Process assignments
+        if (assignmentsRes.data.success) {
+          setAssignments(assignmentsRes.data.assignments || []);
+          
+          // Check for new assignments (within the last 24 hours)
+          const newAssignments = assignmentsRes.data.assignments.filter(assignment => {
+            const assignmentDate = new Date(assignment.createdAt);
+            const now = new Date();
+            const hoursDiff = (now - assignmentDate) / (1000 * 60 * 60);
+            return hoursDiff <= 24;
+          });
+
+          if (newAssignments.length > 0) {
+            toast.success(`You have ${newAssignments.length} new surveillance assignment(s)!`);
+          }
+        }
 
         setNotifications(processedNotifications);
         setPendingSwaps(processedSwaps);
       } catch (error) {
         console.error('Error fetching data:', error);
-        toast.error('Failed to load notifications');
+        toast.error('Failed to load data');
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -190,22 +216,51 @@ export default function Dashboard() {
     toast.success('Logged out successfully');
   };
 
+  // Update stats whenever assignments or pendingSwaps change
+  useEffect(() => {
+    const now = new Date();
+    const upcomingAssignments = assignments.filter(assignment => {
+      const assignmentDate = new Date(assignment.date);
+      return assignmentDate > now;
+    });
+
+    const completedAssignments = assignments.filter(assignment => {
+      const assignmentDate = new Date(assignment.date);
+      return assignmentDate < now;
+    });
+
+    setStats({
+      totalAssignments: assignments.length,
+      upcomingAssignments: upcomingAssignments.length,
+      completedAssignments: completedAssignments.length,
+      pendingSwaps: pendingSwaps.length
+    });
+  }, [assignments, pendingSwaps]);
+
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-10 border-b bg-white">
+    <div className="flex min-h-screen flex-col bg-gray-50">
+      <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
         <div className="container flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-2">
+            <motion.div
+              initial={{ rotate: 0 }}
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, repeatDelay: 5 }}
+            >
             <BookOpen className="h-6 w-6 text-emerald-600" />
-            <span className="text-xl font-bold">UniSwap</span>
+            </motion.div>
+            <span className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-emerald-400 bg-clip-text text-transparent">
+              Dashboard
+            </span>
           </div>
           <nav className="hidden md:flex gap-6">
-            <Link to="/dashboard" className="text-sm font-medium text-emerald-600 border-b-2 border-emerald-600 pb-1">
+            <Link to="/user" className="text-sm font-medium text-emerald-600 border-b-2 border-emerald-600 pb-1">
               Dashboard
             </Link>
-            <Link to="/surveillance" className="text-sm font-medium hover:text-emerald-600">
+            <Link to="/user/surveillance" className="text-sm font-medium hover:text-emerald-600 transition-colors">
               Surveillance
             </Link>
-            <Link to="/swaps" className="text-sm font-medium hover:text-emerald-600">
+            <Link to="/user/swap-requests" className="text-sm font-medium hover:text-emerald-600 transition-colors">
               Swap Requests
             </Link>
           </nav>
@@ -214,11 +269,18 @@ export default function Dashboard() {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="h-5 w-5" />
+                  <AnimatePresence>
                   {(notifications.length > 0 || pendingSwaps.length > 0) && (
-                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
+                      <motion.span
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        exit={{ scale: 0 }}
+                        className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white"
+                      >
                       {notifications.length + pendingSwaps.length}
-                    </span>
+                      </motion.span>
                   )}
+                  </AnimatePresence>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80 bg-white border border-gray-200 shadow-lg">
@@ -273,183 +335,289 @@ export default function Dashboard() {
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button variant="ghost" size="icon">
-              <Settings className="h-5 w-5" />
-            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                  <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-medium">
-                    {user?.firstName?.[0]}{user?.lastName?.[0]}
-                  </div>
+                <Button variant="ghost" size="icon">
+                  <User className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end" forceMount>
+              <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem onClick={() => navigate('/user/profile')}>
                   <User className="mr-2 h-4 w-4" />
-                  <span>Profile</span>
+                  Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout}>
+                <DropdownMenuItem onClick={() => navigate('/user/settings')}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
                   <LogOut className="mr-2 h-4 w-4" />
-                  <span>Log out</span>
+                  Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-medium">
-                {user?.firstName?.[0]}{user?.lastName?.[0]}
-              </div>
-              <span className="hidden md:inline text-sm font-medium">
-                {user?.firstName} {user?.lastName}
-              </span>
-            </div>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 bg-gray-50">
+      <main className="flex-1">
         <div className="container py-6 px-4">
-          <div className="mb-6">
-            <h1 className="text-2xl font-bold">Welcome to USTHB-Xchange, {user?.firstName}</h1>
-            <p className="text-gray-500">Here's what's happening with your teaching schedule</p>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="mb-6"
+          >
+            <h1 className="text-2xl font-bold">Welcome back, {user?.firstName}!</h1>
+            <p className="text-gray-500">Here's an overview of your surveillance duties</p>
+          </motion.div>
+
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+            >
+              <Card className="hover:shadow-lg transition-all duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-emerald-600" />
+                    Total Assignments
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-emerald-600">{stats.totalAssignments}</div>
+                  <p className="text-sm text-gray-500 mt-1">All surveillance duties</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+            >
+              <Card className="hover:shadow-lg transition-all duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <CalendarDays className="h-5 w-5 text-blue-600" />
+                    Upcoming
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-blue-600">{stats.upcomingAssignments}</div>
+                  <p className="text-sm text-gray-500 mt-1">Next 24 hours</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+            >
+              <Card className="hover:shadow-lg transition-all duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    Completed
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-green-600">{stats.completedAssignments}</div>
+                  <p className="text-sm text-gray-500 mt-1">Past assignments</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+            >
+              <Card className="hover:shadow-lg transition-all duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <ArrowLeftRight className="h-5 w-5 text-purple-600" />
+                    Pending Swaps
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-purple-600">{stats.pendingSwaps}</div>
+                  <p className="text-sm text-gray-500 mt-1">Awaiting response</p>
+                </CardContent>
+              </Card>
+            </motion.div>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
-            <Card className="hover:shadow-md transition-all duration-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Upcoming Surveillances</CardTitle>
-                <CardDescription>Your next 24 hours</CardDescription>
+          <div className="grid gap-6 mt-6 md:grid-cols-2">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.5 }}
+            >
+              <Card className="hover:shadow-lg transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-emerald-600" />
+                    Upcoming Assignments
+                  </CardTitle>
+                  <CardDescription>Your next surveillance duties</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
+                  <div className="space-y-4">
                   {loading ? (
-                    <div className="text-center py-4">Loading...</div>
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                      </div>
                   ) : upcomingAssignments.length === 0 ? (
-                    <div className="text-center py-4 text-gray-500">No upcoming surveillances</div>
+                      <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+                        <Calendar className="h-12 w-12 text-gray-300 mb-3" />
+                        <p className="text-gray-500 font-medium">No upcoming assignments</p>
+                        <p className="text-sm text-gray-400 mt-1">You're all caught up!</p>
+                      </div>
                   ) : (
                     upcomingAssignments.map((assignment) => (
-                      <div
+                        <motion.div
                         key={assignment.id}
-                        className="flex items-start gap-3 rounded-lg border p-3 transition-all hover:bg-emerald-50"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-100 hover:border-emerald-200 hover:shadow-md transition-all duration-300"
                       >
-                        <div className="mt-0.5 rounded-full bg-emerald-100 p-1.5">
-                          <Clock className="h-4 w-4 text-emerald-600" />
+                          <div>
+                            <div className="font-medium text-gray-900">{assignment.module}</div>
+                            <div className="text-sm text-gray-500 mt-1">
+                              {new Date(assignment.date).toLocaleDateString()} at {assignment.time}
                         </div>
-                        <div>
-                          <div className="font-medium">
-                            {new Date(assignment.date).toLocaleDateString()}: {assignment.time}
+                            <div className="text-sm text-gray-500">Room: {assignment.room}</div>
                           </div>
-                          <div className="text-sm text-gray-500">{assignment.module}</div>
-                          <div className="text-xs text-gray-400">{assignment.room}</div>
-                        </div>
-                      </div>
+                          {assignment.isResponsible ? (
+                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-emerald-50 text-emerald-700">
+                              <Lock className="w-4 h-4" /> Responsible
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-gray-50 text-gray-600">
+                              Assistant
+                            </span>
+                          )}
+                        </motion.div>
                     ))
                   )}
                 </div>
               </CardContent>
               <CardFooter>
                 <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/user/surveillance')}>
-                  View All Surveillances
+                    View All Assignments
                 </Button>
               </CardFooter>
             </Card>
+            </motion.div>
 
-            <Card className="hover:shadow-md transition-all duration-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Swap Requests</CardTitle>
-                <CardDescription>Pending your action</CardDescription>
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.6 }}
+            >
+              <Card className="hover:shadow-lg transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <ArrowLeftRight className="h-5 w-5 text-emerald-600" />
+                    Pending Swap Requests
+                  </CardTitle>
+                  <CardDescription>Requests awaiting your response</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
+                  <div className="space-y-4">
                   {loading ? (
-                    <div className="text-center py-4">Loading...</div>
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                      </div>
                   ) : pendingSwaps.length === 0 ? (
-                    <div className="text-center py-4 text-gray-500">No pending swap requests</div>
+                      <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+                        <ArrowLeftRight className="h-12 w-12 text-gray-300 mb-3" />
+                        <p className="text-gray-500 font-medium">No pending swap requests</p>
+                        <p className="text-sm text-gray-400 mt-1">All requests have been handled</p>
+                      </div>
                   ) : (
                     pendingSwaps.map((swap) => (
-                      <div
+                        <motion.div
                         key={swap.id}
-                        className="flex flex-col gap-2 rounded-lg border p-3 transition-all hover:bg-emerald-50"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="mt-0.5 rounded-full bg-emerald-100 p-1.5">
-                            <ArrowLeftRight className="h-4 w-4 text-emerald-600" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium">
-                              Swap Request
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-                              <div className="bg-gray-50 rounded p-2 border">
-                                <div className="text-xs text-gray-500 font-semibold mb-1">From Assignment</div>
-                                <div className="text-sm text-gray-900 font-bold">{swap.fromAssignment?.module}</div>
-                                <div className="text-xs text-gray-600">{swap.fromAssignment?.date ? new Date(swap.fromAssignment.date).toLocaleDateString() : ''} at {swap.fromAssignment?.time}</div>
-                                <div className="text-xs text-gray-400">Room: {swap.fromAssignment?.room}</div>
-                                <div className="text-xs text-gray-400 mt-1">Owner: {swap.fromAssignment?.user?.firstName} {swap.fromAssignment?.user?.lastName}</div>
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-4 bg-white rounded-lg border border-gray-100 hover:border-emerald-200 hover:shadow-md transition-all duration-300"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="font-medium text-gray-900">{swap.module}</div>
+                              <div className="text-sm text-gray-500 mt-1">
+                                {new Date(swap.date).toLocaleDateString()} at {swap.time}
                               </div>
-                              <div className="bg-gray-50 rounded p-2 border">
-                                <div className="text-xs text-gray-500 font-semibold mb-1">To Assignment</div>
-                                <div className="text-sm text-gray-900 font-bold">{swap.toAssignment?.module}</div>
-                                <div className="text-xs text-gray-600">{swap.toAssignment?.date ? new Date(swap.toAssignment.date).toLocaleDateString() : ''} at {swap.toAssignment?.time}</div>
-                                <div className="text-xs text-gray-400">Room: {swap.toAssignment?.room}</div>
-                                <div className="text-xs text-gray-400 mt-1">Owner: {swap.toAssignment?.user?.firstName} {swap.toAssignment?.user?.lastName}</div>
+                              <div className="text-sm text-gray-500 mt-1">
+                                From: <span className="font-medium text-gray-700">{swap.senderName}</span>
                               </div>
                             </div>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 pl-9 mt-1">
-                          {swap.isSender ? (
-                            <Button size="sm" variant="outline" className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleSwapAction(swap.id, 'cancel')}>
-                              <XCircle className="h-3 w-3 mr-1" /> Cancel Request
-                            </Button>
-                          ) : (
-                            <>
-                              <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleSwapAction(swap.id, 'accept')}>
-                                <CheckCircle className="h-3 w-3 mr-1" /> Accept
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                                onClick={() => handleSwapAction(swap.id, 'accept')}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Accept
                               </Button>
-                              <Button size="sm" variant="outline" className="h-7" onClick={() => handleSwapAction(swap.id, 'decline')}>
-                                <XCircle className="h-3 w-3 mr-1" /> Decline
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-gray-200 hover:bg-gray-50 transition-colors"
+                                onClick={() => handleSwapAction(swap.id, 'decline')}
+                              >
+                                <XCircle className="h-4 w-4 mr-1" />
+                                Decline
                               </Button>
-                            </>
-                          )}
                         </div>
                       </div>
+                        </motion.div>
                     ))
                   )}
                 </div>
               </CardContent>
               <CardFooter>
-                <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/swaps')}>
+                  <Button variant="ghost" className="w-full text-emerald-600" onClick={() => navigate('/user/swap-requests')}>
                   View All Requests
                 </Button>
               </CardFooter>
             </Card>
+            </motion.div>
+          </div>
 
-            <Card className="hover:shadow-md transition-all duration-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Quick Actions</CardTitle>
-                <CardDescription>Common tasks</CardDescription>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.7 }}
+            className="mt-6"
+          >
+            <Card className="hover:shadow-lg transition-all duration-300">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BarChart2 className="h-5 w-5 text-emerald-600" />
+                  Quick Actions
+                </CardTitle>
+                <CardDescription>Common tasks and shortcuts</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <Button className="w-full justify-start bg-emerald-600 hover:bg-emerald-700" onClick={() => navigate('/user/surveillance')}>
                     <ArrowLeftRight className="h-4 w-4 mr-2" /> Request New Swap
                   </Button>
                   <Button variant="outline" className="w-full justify-start" onClick={() => navigate('/user/surveillance')}>
                     <Calendar className="h-4 w-4 mr-2" /> View Calendar
                   </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Users className="h-4 w-4 mr-2" /> Find Colleagues
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Settings className="h-4 w-4 mr-2" /> Preferences
-                  </Button>
                 </div>
               </CardContent>
             </Card>
-          </div>
+          </motion.div>
         </div>
       </main>
     </div>
   );
-};
+}

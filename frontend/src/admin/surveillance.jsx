@@ -442,7 +442,7 @@ export default function SurveillanceManagement() {
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
         <DialogContent className="max-w-4xl bg-white max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+          <DialogHeader className="sticky top-0 bg-white z-10 pb-4 border-b">
             <DialogTitle>Preview Extracted Data</DialogTitle>
             <DialogDescription>
               Review the extracted surveillance assignments for {selectedTeacher?.name}. 
@@ -450,29 +450,48 @@ export default function SurveillanceManagement() {
             </DialogDescription>
           </DialogHeader>
           
-          {/* New section for Responsible selection */}
           {previewAssignments.length > 0 && (
-            <div className="mt-4 space-y-2">
-              <h4 className="font-medium text-gray-900">Mark Responsible Assignments:</h4>
-              <div className="border rounded-lg p-4 space-y-3 max-h-[400px] overflow-y-auto">
+            <div className="mt-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium text-gray-900">Mark Responsible Assignments:</h4>
+                <div className="text-sm text-gray-500">
+                  {responsibleAssignments.size} of {previewAssignments.length} selected
+                </div>
+              </div>
+              <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
                 {previewAssignments.map((assignment, index) => (
-                  <div key={index} className="flex items-center justify-between bg-white p-2 rounded-md">
-                    <div>
-                      <div className="font-medium">{assignment.module} - {assignment.room}</div>
-                      <div className="text-sm text-gray-500">
-                        {format(new Date(assignment.date), 'dd/MM/yyyy')} at {assignment.time}
+                  <div
+                    key={index}
+                    className={`p-4 rounded-lg border transition-colors ${
+                      responsibleAssignments.has(index)
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : 'border-gray-200 bg-white hover:border-emerald-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">{assignment.module}</div>
+                        <div className="text-sm text-gray-600 mt-1">
+                          {new Date(assignment.date).toLocaleDateString()} at {assignment.time}
+                        </div>
+                        <div className="text-sm text-gray-600">Room: {assignment.room}</div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id={`responsible-select-${index}`}
-                        checked={responsibleAssignments.has(index)}
-                        onChange={() => handleToggleResponsible(index)}
-                        className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <label htmlFor={`responsible-select-${index}`} className="text-sm text-gray-700">
-                        {responsibleAssignments.has(index) ? 'Responsible' : 'Assistant'}
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={responsibleAssignments.has(index)}
+                          onChange={(e) => {
+                            const newResponsible = new Set(responsibleAssignments);
+                            if (e.target.checked) {
+                              newResponsible.add(index);
+                            } else {
+                              newResponsible.delete(index);
+                            }
+                            setResponsibleAssignments(newResponsible);
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">Responsible</span>
                       </label>
                     </div>
                   </div>
@@ -481,21 +500,27 @@ export default function SurveillanceManagement() {
             </div>
           )}
 
-          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-            <h4 className="font-medium text-gray-900 mb-2">About Roles:</h4>
-            <ul className="text-sm text-gray-600 space-y-2">
-              <li className="flex items-center gap-2">
-                <Lock className="w-4 h-4 text-emerald-700" />
-                <span><strong>Responsible:</strong> The teacher will be in charge of the surveillance and cannot swap this assignment.</span>
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-3">About Roles:</h4>
+            <ul className="text-sm text-gray-600 space-y-3">
+              <li className="flex items-start gap-3">
+                <Lock className="w-5 h-5 text-emerald-700 mt-0.5" />
+                <div>
+                  <span className="font-medium text-gray-900">Responsible:</span>
+                  <p className="mt-1">The teacher will be in charge of the surveillance and cannot swap this assignment.</p>
+                </div>
               </li>
-              <li className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-500" />
-                <span><strong>Assistant:</strong> The teacher will assist in the surveillance and can swap this assignment with other teachers.</span>
+              <li className="flex items-start gap-3">
+                <Users className="w-5 h-5 text-gray-500 mt-0.5" />
+                <div>
+                  <span className="font-medium text-gray-900">Assistant:</span>
+                  <p className="mt-1">The teacher will assist in the surveillance and can swap this assignment with other teachers.</p>
+                </div>
               </li>
             </ul>
           </div>
 
-          <DialogFooter className="mt-6 sticky bottom-0 bg-white pt-4 border-t">
+          <DialogFooter className="sticky bottom-0 bg-white pt-4 border-t mt-6">
             <Button variant="outline" onClick={() => setShowPreview(false)} disabled={importing}>
               Cancel
             </Button>

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { ShieldCheck, User, Menu, X } from 'lucide-react';
+import { ShieldCheck, User, Menu, X, ArrowLeftRight } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 const navLinks = [
   { to: '/user/page', label: 'Dashboard', icon: ShieldCheck },
   { to: '/user/surveillance', label: 'Surveillance', icon: ShieldCheck },
+  { to: '/user/swap-requests', label: 'Swap Requests', icon: ArrowLeftRight },
   { to: '/user/profile', label: 'Profile', icon: User },
 ];
 

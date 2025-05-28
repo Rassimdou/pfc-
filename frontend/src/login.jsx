@@ -108,8 +108,7 @@ export default function Login() {
 
   const handleGoogleLogin = () => {
     setLoading(true);
-    const baseUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, ''); // Remove trailing slash if present
-    const googleAuthUrl = `${baseUrl}/api/auth/google`;
+    const googleAuthUrl = 'http://localhost:5000/api/auth/google';
     console.log('Redirecting to Google auth:', googleAuthUrl);
     window.location.href = googleAuthUrl;
   };

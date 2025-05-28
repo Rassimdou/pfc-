@@ -82,7 +82,7 @@ export default function Surveillance() {
       if (response.data.success) {
         setPotentialMatches(response.data.potentialMatches || []);
         if (response.data.potentialMatches.length === 0) {
-          toast('No swappable assignments found matching your criteria.');
+          toast.error('No swappable assignments found matching your criteria.');
         } else {
           toast.success(`${response.data.potentialMatches.length} potential swap targets found.`);
         }
@@ -178,6 +178,102 @@ export default function Surveillance() {
 
     return matchesSearch;
   });
+
+  const handleSearch = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/user/surveillance/swap-requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          date: searchDate,
+          timeSlot: searchTimeSlot,
+          type: searchType
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        if (data.assignments.length === 0) {
+          toast({
+            title: "No Assignments",
+            description: "No swappable assignments found matching your criteria.",
+            variant: "destructive"
+          });
+        }
+        setAssignments(data.assignments);
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      console.error('Error searching assignments:', error);
+      if (error.message === 'Session expired') {
+        toast({
+          title: "Session Expired",
+          description: "Please log in again to continue.",
+          variant: "destructive"
+        });
+        navigate('/login');
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to search assignments",
+          variant: "destructive"
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSwapRequest = async (assignmentId) => {
+    try {
+      const response = await fetch('/api/user/surveillance/swap-requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          assignmentId,
+          date: searchDate,
+          timeSlot: searchTimeSlot,
+          type: searchType
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Swap request sent successfully"
+        });
+        // Refresh the assignments list
+        handleSearch();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      console.error('Error sending swap request:', error);
+      if (error.message === 'Session expired') {
+        toast({
+          title: "Session Expired",
+          description: "Please log in again to continue.",
+          variant: "destructive"
+        });
+        navigate('/login');
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to send swap request",
+          variant: "destructive"
+        });
+      }
+    }
+  };
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -326,7 +422,7 @@ export default function Surveillance() {
                           )}
                         </td>
                         <td className="px-4 py-2">
-                          {!assignment.isResponsible && assignment.canSwap && !assignment.swapRequest && (
+                          {!assignment.isResponsible && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -361,8 +457,8 @@ export default function Surveillance() {
       </Card>
 
       <Dialog open={showSwapDialog} onOpenChange={setShowSwapDialog}>
-        <DialogContent className="max-w-4xl bg-white">
-          <DialogHeader>
+        <DialogContent className="max-w-4xl bg-white max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="sticky top-0 bg-white z-10 pb-4 border-b">
             <DialogTitle>Request Swap</DialogTitle>
             <DialogDescription>
               Search for swappable assignments by date and time
@@ -371,88 +467,95 @@ export default function Surveillance() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium">Your Assignment</Label>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <div className="font-medium">{selectedAssignment?.module}</div>
-                <div className="text-sm text-gray-500">
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
+                <div className="font-medium text-gray-900">{selectedAssignment?.module}</div>
+                <div className="text-sm text-gray-600 mt-1">
                   {selectedAssignment?.date && new Date(selectedAssignment.date).toLocaleDateString()} at {selectedAssignment?.time}
                 </div>
-                <div className="text-sm text-gray-500">Room: {selectedAssignment?.room}</div>
+                <div className="text-sm text-gray-600">Room: {selectedAssignment?.room}</div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium" htmlFor="desiredDate">Desired Swap Date and Time</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="desiredDate"
-                  type="date"
-                  value={desiredDate}
-                  onChange={(e) => setDesiredDate(e.target.value)}
-                  className="flex-1"
-                />
-                <Input
-                  type="time"
-                  value={desiredTime}
-                  onChange={(e) => setDesiredTime(e.target.value)}
-                  className="flex-1"
-                />
-                <Button onClick={handleSearchMatches} disabled={searchingMatches}>
-                   {searchingMatches ? (
-                     <>
-                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                       Searching...
-                     </>
-                   ) : (
-                     <>
-                       <Search className="h-4 w-4 mr-2" />
-                       Search
-                     </>
-                   )}
-                 </Button>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Desired Date</Label>
+                  <Input
+                    type="date"
+                    value={desiredDate}
+                    onChange={(e) => setDesiredDate(e.target.value)}
+                    className="w-full"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Desired Time</Label>
+                  <Input
+                    type="time"
+                    value={desiredTime}
+                    onChange={(e) => setDesiredTime(e.target.value)}
+                    className="w-full"
+                  />
+                </div>
               </div>
+              <Button
+                onClick={handleSearchMatches}
+                disabled={!desiredDate || !desiredTime || searchingMatches}
+                className="w-full bg-emerald-600 hover:bg-emerald-700"
+              >
+                {searchingMatches ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Searching...
+                  </>
+                ) : (
+                  <>
+                    <Search className="mr-2 h-4 w-4" />
+                    Search for Matches
+                  </>
+                )}
+              </Button>
             </div>
 
-            {/* Display Potential Matches */}
             {potentialMatches.length > 0 && (
-               <div className="space-y-2">
-                 <Label className="text-sm font-medium">Potential Swap Targets ({potentialMatches.length})</Label>
-                 <div className="border rounded-lg max-h-40 overflow-y-auto">
-                   {potentialMatches.map(match => (
-                     <div
-                       key={match.id}
-                       className={`flex items-center justify-between p-2 border-b last:border-b-0 cursor-pointer ${selectedPotentialMatchId === match.id ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}
-                       onClick={() => setSelectedPotentialMatchId(match.id)}
-                     >
-                        <div className="flex-1">
-                           <div className="font-medium">{match.module} - {match.room}</div>
-                           <div className="text-sm text-gray-500">
-                              {new Date(match.date).toLocaleDateString()} at {match.time}
-                           </div>
-                           {/* Show sender's assignment details */}
-                           <div className="mt-2 text-sm text-gray-600">
-                              <div className="font-medium text-emerald-600">You will receive:</div>
-                              <div>{match.senderAssignment.module} - {match.senderAssignment.room}</div>
-                              <div className="text-gray-500">
-                                 {new Date(match.senderAssignment.date).toLocaleDateString()} at {match.senderAssignment.time}
-                              </div>
-                           </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Potential Matches</Label>
+                <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
+                  {potentialMatches.map((match) => (
+                    <div
+                      key={match.id}
+                      className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                        selectedPotentialMatchId === match.id
+                          ? 'border-emerald-500 bg-emerald-50'
+                          : 'border-gray-200 hover:border-emerald-300 hover:bg-gray-50'
+                      }`}
+                      onClick={() => setSelectedPotentialMatchId(match.id)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="font-medium text-gray-900">{match.module}</div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {new Date(match.date).toLocaleDateString()} at {match.time}
+                          </div>
+                          <div className="text-sm text-gray-600">Room: {match.room}</div>
                         </div>
                         {selectedPotentialMatchId === match.id && (
-                            <CheckCircle className="h-5 w-5 text-emerald-600 ml-4" />
+                          <CheckCircle className="h-5 w-5 text-emerald-600" />
                         )}
-                     </div>
-                   ))}
-                 </div>
-               </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
-            {/* Message if no matches found after search */}
             {!searchingMatches && potentialMatches.length === 0 && desiredDate && desiredTime && (
-                <div className="text-center text-gray-500 py-4">No swappable assignments found matching your criteria.</div>
+              <div className="text-center py-6 bg-gray-50 rounded-lg border border-gray-200">
+                <AlertCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                <div className="text-gray-500">No swappable assignments found matching your criteria.</div>
+              </div>
             )}
-
           </div>
-          <DialogFooter>
+          <DialogFooter className="sticky bottom-0 bg-white pt-4 border-t mt-4">
             <Button variant="outline" onClick={() => setShowSwapDialog(false)}>
               Cancel
             </Button>
